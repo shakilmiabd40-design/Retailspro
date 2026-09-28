@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: RetailPro Public API
+  version: "2026-09-01"
+  description: |
+    Server-to-server API for the online store. Authenticate with `Authorization: Bearer rp_live_…`.
+    Never call it from browser code. Webhooks (RetailPro → website) are described in API.md.
+servers:
+  - url: https://YOUR-RETAILPRO-DOMAIN/api/v1
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: insufficient_stock }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+    Variant:
+      type: object
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        barcode: { type: string, nullable: true }
+        color: { type: string }
+        size: { type: string }
+        price: { type: number }
+        status: { type: string, enum: [active, inactive] }
+        stock: { type: integer }
+        reserved: { type: integer }
+        available: { type: integer, description: stock − reserved }
+    Product:
+      type: object
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        barcode: { type: string, nullable: true }
+        name: { type: string }
+        brand: { type: string }
+        category: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [active, inactive] }
+        image_url: { type: string, nullable: true }
+        gender: { type: string, nullable: true }
+        shoe_type: { type: string, nullable: true }
+        material: { type: string, nullable: true }
+        currency: { type: string, example: BDT }
+        selling_price: { type: number }
+        discount_price: { type: number, nullable: true }
+        colors: { type: array, items: { type: string } }
+        sizes: { type: array, items: { type: string } }
+        variants: { type: array, items: { $ref: "#/components/schemas/Variant" } }
+        total_available: { type: integer }
+        created_at: { type: string, format: date-time }
+    OrderStatus:
+      type: string
+      enum: [pending, processing, in_transit, delivered, partial_delivered, refuse_return, cancelled]
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        order_number: { type: string, example: ORD-10245 }
+        external_id: { type: string, nullable: true }
+        channel: { type: string }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        customer:
+          type: object
+          properties:
+            name: { type: string }
+            phone: { type: string }
+            alt_phone: { type: string, nullable: true }
+            address: { type: string }
+            district: { type: string, nullable: true }
+            area: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id: { type: string }
+              variant_id: { type: string }
+              sku: { type: string }
+              name: { type: string }
+              color: { type: string }
+              size: { type: string }
+              unit_price: { type: number }
+              qty: { type: integer }
+              discount: { type: number }
+              line_total: { type: number }
+        currency: { type: string }
+        amounts:
+          type: object
+          properties:
+            subtotal: { type: number }
+            discount_total: { type: number }
+            delivery_charge: { type: number }
+            expected_cod: { type: number }
+        courier:
+          type: object
+          properties:
+            company: { type: string, nullable: true }
+            tracking_id: { type: string, nullable: true }
+            dispatch_date: { type: string, nullable: true }
+        delivery:
+          type: object
+          properties:
+            collected_amount: { type: number, nullable: true }
+            delivery_date: { type: string, nullable: true }
+        cancellation: { type: object, nullable: true }
+        timeline: { type: array, items: { type: object } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateOrder:
+      type: object
+      required: [external_id, customer, items]
+      properties:
+        external_id: { type: string, maxLength: 100, description: Your own order id; makes retries safe. }
+        customer:
+          type: object
+          required: [name, phone, address]
+          properties:
+            name: { type: string }
+            phone: { type: string, example: "01712345678" }
+            alt_phone: { type: string }
+            address: { type: string }
+            district: { type: string }
+            area: { type: string }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [qty]
+            properties:
+              sku: { type: string, description: Variant SKU }
+              product_id: { type: string }
+              variant_id: { type: string }
+              qty: { type: integer, minimum: 1, maximum: 100 }
+              unit_price: { type: number }
+              discount: { type: number }
+        delivery_charge: { type: number }
+        notes: { type: string }
+  parameters:
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+    cursor: { name: cursor, in: query, schema: { type: string } }
+    updated_since: { name: updated_since, in: query, schema: { type: string, format: date-time } }
+  responses:
+    Err:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+paths:
+  /ping:
+    get:
+      summary: Check the API key
+      responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Err" } }
+  /products:
+    get:
+      summary: List products with live stock (scope products:read)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive, all], default: active } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: brand, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/updated_since" }
+        - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/cursor" }
+      responses:
+        "200":
+          description: A page of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Product" } }
+                  has_more: { type: boolean }
+                  next_cursor: { type: string, nullable: true }
+  /products/{id}:
+    get:
+      summary: One product (by id, product SKU or variant SKU)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Product" } } } } } }
+        "404": { $ref: "#/components/responses/Err" }
+  /orders:
+    get:
+      summary: List the orders this key created (scope orders:read)
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/OrderStatus" } }
+        - { name: external_id, in: query, schema: { type: string } }
+        - { name: phone, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/updated_since" }
+        - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/cursor" }
+      responses:
+        "200":
+          description: A page of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Order" } }
+                  has_more: { type: boolean }
+                  next_cursor: { type: string, nullable: true }
+    post:
+      summary: Place a cash-on-delivery order; reserves stock (scope orders:write)
+      description: Idempotent on `external_id` — repeating it returns the original order with HTTP 200 and `duplicate:true`.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateOrder" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Order" }, duplicate: { type: boolean } } } } } }
+        "200": { description: Already existed (duplicate external_id) }
+        "409": { $ref: "#/components/responses/Err" }
+        "422": { $ref: "#/components/responses/Err" }
+  /orders/{id}:
+    get:
+      summary: One of this key's orders (by id, order number or external_id)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Order" } } } } } }
+        "404": { $ref: "#/components/responses/Err" }
+  /orders/{id}/cancel:
+    post:
+      summary: Cancel an order before it reaches the courier (scope orders:write)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string }, notes: { type: string } } } } }
+      responses:
+        "200": { description: Cancelled (or already cancelled), content: { application/json: { schema: { type: object, properties: { data: { $ref: "#/components/schemas/Order" } } } } } }
+        "409": { $ref: "#/components/responses/Err" }
