@@ -1,0 +1,48 @@
+{
+  "name": "inventory-pro-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:setup": "node scripts/setup-db.mjs",
+    "db:reset": "node scripts/setup-db.mjs --reset",
+    "test:pos": "npx --yes tsx --test src/lib/pos/utils.test.ts",
+    "test:accounting": "npx --yes tsx --test src/lib/accounting/utils.test.ts",
+    "test:barcode": "npx --yes tsx --test src/lib/settings/barcode.test.ts",
+    "test:geo": "npx --yes tsx --test src/lib/orders/geo.test.ts",
+    "test:auth": "npx --yes tsx --test --conditions=react-server src/server/auth.test.ts",
+    "test:access": "npx --yes tsx --test --conditions=react-server src/server/collections.test.ts",
+    "test:webhooks": "npx --yes tsx --test --conditions=react-server src/server/publicapi/webhooks.test.ts",
+    "test:validate": "npx --yes tsx --test --conditions=react-server src/server/validate.test.ts",
+    "test:redact": "npx --yes tsx --test --conditions=react-server src/server/redact.test.ts",
+    "test:server": "npx --yes tsx --test --conditions=react-server src/server/auth.test.ts src/server/collections.test.ts src/server/publicapi/webhooks.test.ts src/server/validate.test.ts src/server/redact.test.ts"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
+    "lucide-react": "^1.46.0",
+    "next": "16.3.5",
+    "next-themes": "^0.4.6",
+    "nodemailer": "^10.0.11",
+    "pg": "^8.23.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "recharts": "^3.10.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
