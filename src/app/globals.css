@@ -1,0 +1,191 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f4f5f7;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --border: #e6e7eb;
+  --border-soft: #eef0f3;
+  --text: #14161b;
+  --text-muted: #6b7280;
+  --text-faint: #9aa1ad;
+
+  --brand: #f97316;
+  --brand-strong: #ea6a0c;
+  --brand-soft: #fff1e6;
+  --brand-tint-bg: #fff4ea;
+  --brand-tint-border: #ffdcb8;
+
+  --green: #16a34a;
+  --green-soft: #e9f9ee;
+  --red: #e11d48;
+  --red-soft: #fdecef;
+  --blue: #2563eb;
+  --blue-soft: #eaf1ff;
+
+  --chart-1: #f97316;
+  --chart-2: #c2703a;
+  --chart-3: #8a4a26;
+  --chart-4: #d99a5b;
+  --chart-5: #d8d3cb;
+
+  --sidebar-bg: #ffffff;
+  --sidebar-active-bg: #fff1e6;
+  --sidebar-active-text: #ea6a0c;
+
+  --shadow-card: 0 1px 2px rgba(20, 22, 27, 0.04), 0 1px 1px rgba(20, 22, 27, 0.03);
+}
+
+.dark {
+  --bg: #0a0c12;
+  --bg-elevated: #10131b;
+  --surface: #12151d;
+  --surface-2: #171b25;
+  --border: #232838;
+  --border-soft: #1c2029;
+  --text: #f2f3f5;
+  --text-muted: #9099ac;
+  --text-faint: #5b6272;
+
+  --brand: #f97316;
+  --brand-strong: #fb923c;
+  --brand-soft: rgba(249, 115, 22, 0.14);
+  --brand-tint-bg: #2a1608;
+  --brand-tint-border: #4a2a0e;
+
+  --green: #22c55e;
+  --green-soft: rgba(34, 197, 94, 0.14);
+  --red: #f43f5e;
+  --red-soft: rgba(244, 63, 94, 0.14);
+  --blue: #3b82f6;
+  --blue-soft: rgba(59, 130, 246, 0.14);
+
+  --chart-1: #f97316;
+  --chart-2: #2a1c14;
+  --chart-3: #4a3222;
+  --chart-4: #7c5b3f;
+  --chart-5: #2a2e38;
+
+  --sidebar-bg: #10131b;
+  --sidebar-active-bg: rgba(249, 115, 22, 0.14);
+  --sidebar-active-text: #fb923c;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-brand: var(--brand);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  height: 100%;
+  /* Safety net: nothing on the site should be intentionally wider than the viewport on mobile — this
+     catches any stray element that slips through and turns it into local scroll instead of a page-wide
+     horizontal scrollbar. */
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---- Reports: print layout ------------------------------------------------ */
+.print-only {
+  display: none;
+}
+
+@media print {
+  /* Always print in the light palette, whatever theme is on screen. */
+  :root,
+  .dark {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f5f6f8;
+    --border: #d9dce3;
+    --border-soft: #e9ebf0;
+    --text: #14161b;
+    --text-muted: #4b5563;
+    --text-faint: #6b7280;
+    --brand-soft: #fff1e6;
+  }
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body,
+  .min-h-screen {
+    background: #ffffff !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .card {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+  table {
+    font-size: 11px;
+  }
+}
+
+/* ---- POS receipt: print just the receipt, straight from the sale screen ------ */
+@media print {
+  html.printing-receipt body > *:not(.receipt-portal) {
+    display: none !important;
+  }
+  html.printing-receipt .receipt-portal {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    background: none !important;
+    overflow: visible !important;
+  }
+  html.printing-receipt .receipt-portal .no-print {
+    display: none !important;
+  }
+}
