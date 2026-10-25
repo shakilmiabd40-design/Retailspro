@@ -7,12 +7,6 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/courier/steadfast — creates a Steadfast consignment for an order being dispatched
- * (Processing → In Transit). Called from the dispatch form in UpdateStatusModal.
- *
- * The route does NOT write the order itself: it returns the consignment id and the browser saves the
- * order through the normal /api/sync flow (dispatchOrder), so optimistic versioning stays intact.
- * The Steadfast consignment id is stored as the order's courier.trackingId — it's what the status
- * endpoints need; the human tracking code goes into the activity log via the success toast.
  */
 export const POST = route(async (req) => {
   await requireAuth(req);
@@ -36,11 +30,7 @@ export const POST = route(async (req) => {
 });
 
 /**
- * GET /api/courier/steadfast?id=<consignment_id> — the consignment's current status at Steadfast,
- * used by the "Check Steadfast status" button on in-transit orders.
- *
- * GET /api/courier/steadfast?ping=1 — "Test connection" from Settings: calls Steadfast's authenticated
- * GET /get_balance so staff can verify the key/secret (and base URL) without placing a real order.
+ * GET /api/courier/steadfast?id=<consignment_id> — the consignment's current status and delivery charge
  */
 export const GET = route(async (req) => {
   await requireAuth(req);
@@ -56,5 +46,10 @@ export const GET = route(async (req) => {
   if (!id) throw new ApiError(400, "invalid", "id (consignment id) is required.");
   const r = await getSteadfastConsignment(id);
   if (!r.ok) throw new ApiError(502, "steadfast_error", r.error);
-  return json({ status: r.data.consignment?.status ?? null, consignment: r.data.consignment ?? null });
+
+  return json({
+    status: r.data.status || null,
+    delivery_charge: r.data.delivery_charge || 0,
+    consignment: r.data,
+  });
 });

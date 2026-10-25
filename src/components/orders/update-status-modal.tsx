@@ -150,12 +150,16 @@ export function UpdateStatusModal({
     if (!order?.courier.trackingId || checking) return;
     setChecking(true);
     try {
-      const res = await api<{ status: string | null }>("GET", `/api/courier/steadfast?id=${encodeURIComponent(order.courier.trackingId)}`);
-      if (!res.status) {
+      const res = await api<any>("GET", `/api/courier/steadfast?id=${encodeURIComponent(order.courier.trackingId)}`);
+      console.log("Steadfast API Response:", res);
+      if (!res?.status) {
         showToast("Steadfast didn't report a status for this consignment.", "error");
       } else {
-        const s = res.status.toLowerCase();
+        const s = String(res.status).toLowerCase();
         showToast(`Steadfast says: ${res.status}`);
+        // Log all possible charge fields to find the right one
+        const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
+        setForwardCharge(charge);
         if (s.includes("partial")) setOutcome("partial");
         else if (s.includes("deliver")) { setOutcome("delivered"); setCustomerPaid(expectedCod(order)); }
         else if (s.includes("cancel") || s.includes("return")) setOutcome("refuse");
