@@ -5,6 +5,13 @@ import { query } from "@/server/db";
 export const dynamic = "force-dynamic";
 
 /**
+ * Healthcheck GET for webhook verification ping.
+ */
+export async function GET() {
+  return NextResponse.json({ status: "ok", service: "steadfast-webhook" });
+}
+
+/**
  * Incoming Webhook from Steadfast.
  * Verifies HMAC signature, extracts delivery_charge, and updates the order in the database.
  */
