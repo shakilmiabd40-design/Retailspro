@@ -22,8 +22,13 @@ async function connectToWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('QR Code received. View at /qr');
       latestQR = qr;
+      try {
+        await qrcode.toFile('qr.png', qr);
+        console.log('QR Code received. View at /qr or open qr.png');
+      } catch (e) {
+        console.error('Error saving QR to file', e);
+      }
     }
 
     if (connection === 'close') {
