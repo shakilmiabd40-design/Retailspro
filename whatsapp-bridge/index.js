@@ -47,6 +47,10 @@ async function connectToWhatsApp() {
   });
 }
 
+app.get('/', (req, res) => {
+  res.send({ status: 'ok', connected: !!sock, message: 'WhatsApp Bridge is running. Visit /qr to scan QR code.' });
+});
+
 app.get('/qr', async (req, res) => {
   if (!latestQR) return res.send('<html><body><h3>QR not ready or already connected. Please wait or restart service.</h3></body></html>');
   try {
