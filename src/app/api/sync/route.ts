@@ -8,6 +8,7 @@ import { bumpRev } from "@/server/seed";
 import { DEFAULT_SETTINGS } from "@/lib/settings/defaults";
 import { after } from "next/server";
 import { deliverDue, enqueueEvents, orderEvents, productEvents, type DomainEvent } from "@/server/publicapi/webhooks";
+import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
 import type { Order } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
 
@@ -52,6 +53,7 @@ export const POST = route(async (req) => {
   const actor = auth.user.id;
   const seeProductCost = canSeeProductCost(auth.role);
   let queuedEvents = 0;
+  const whatsappNotifications: { prev: Order | undefined; next: Order }[] = [];
 
   await tx(async (client) => {
     // Webhooks: only do the extra "what was it before?" reads when someone is actually listening.
@@ -121,7 +123,15 @@ export const POST = route(async (req) => {
       // A bug in event building must never stop a sale from being saved, so it is fenced off.
       if (listening && !conflicts.length) {
         try {
-          if (name === "orders") for (const u of upserts) events.push(...orderEvents(before.get(u.id) as Order | undefined, (effective.get(u.id) ?? u.data) as unknown as Order));
+          if (name === "orders") {
+            for (const u of upserts) {
+              events.push(...orderEvents(before.get(u.id) as Order | undefined, (effective.get(u.id) ?? u.data) as unknown as Order));
+              whatsappNotifications.push({
+                prev: before.get(u.id) as Order | undefined,
+                next: (effective.get(u.id) ?? u.data) as unknown as Order,
+              });
+            }
+          }
           if (name === "products") {
             for (const u of upserts) events.push(...productEvents(before.get(u.id) as Product | undefined, (effective.get(u.id) ?? u.data) as unknown as Product));
             for (const id of deletes) if (typeof id === "string") events.push(...productEvents(before.get(id) as Product | undefined, null));
@@ -188,6 +198,10 @@ export const POST = route(async (req) => {
   });
 
   if (queuedEvents > 0) after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+
+  if (whatsappNotifications.length) {
+    after(() => Promise.all(whatsappNotifications.map(({ prev, next }) => handleOrderStatusWhatsAppNotification(prev, next))));
+  }
 
   return json({ ok: true, versions, documents: docVersions, revs });
 });
