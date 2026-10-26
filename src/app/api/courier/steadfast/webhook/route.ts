@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/server/db";
+import { tx } from "@/server/db";
+import { bumpRev } from "@/server/seed";
+import type { Order, OrderStatus } from "@/lib/orders/types";
 
 export const dynamic = "force-dynamic";
 
@@ -45,27 +47,97 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Update Order
-  // Only update if it's delivered or partial, to avoid overwriting with stale data.
-  if (status === "delivered" || status === "partial_delivered") {
-    try {
+  try {
+    await tx(async (client) => {
       // Find the order by orderNumber (invoice)
-      // We assume orderNumber is unique or mapped to the invoice
-      await query(
-        `update app_documents
-         set data = jsonb_set(
-           data,
-           '{courier, forwardCost}',
-           $1::text::jsonb
-         )
-         where key = 'order_' || $2`,
-        [JSON.stringify(delivery_charge), invoice]
+      const res = await client.query<{ id: string; data: Order }>(
+        `select id, data from app_records 
+         where collection = 'orders' and data->>'orderNumber' = $1 
+         limit 1 for update`,
+        [invoice]
       );
 
-      console.log(`Updated order ${invoice} with courier charge ${delivery_charge}`);
-    } catch (err) {
-      console.error(`Failed to update order ${invoice}:`, err);
-      return new NextResponse("Internal Server Error", { status: 500 });
-    }
+      if (!res.rows[0]) {
+        console.warn(`Order not found for invoice ${invoice}`);
+        return;
+      }
+
+      const row = res.rows[0];
+      const order: Order = row.data;
+      const now = new Date().toISOString();
+
+      // Update forward cost if provided
+      if (typeof delivery_charge === "number") {
+        order.courier = {
+          ...order.courier,
+          forwardCost: delivery_charge,
+        };
+      }
+
+      // Map Steadfast status to RetailPro order status
+      let newStatus: OrderStatus | undefined;
+      let activityLabel = "Courier status update";
+      let activityDetail = `Steadfast status: ${status}`;
+
+      if (status === "delivered") {
+        newStatus = "delivered";
+        activityLabel = "Marked Delivered (Steadfast Webhook)";
+        if (typeof event.cod_amount === "number") {
+          order.delivery = {
+            ...order.delivery,
+            customerPaid: event.cod_amount,
+            deliveryDate: event.updated_at || now,
+          };
+        }
+      } else if (status === "partial_delivered") {
+        newStatus = "partial_delivered";
+        activityLabel = "Marked Partial Delivered (Steadfast Webhook)";
+        if (typeof event.cod_amount === "number") {
+          order.delivery = {
+            ...order.delivery,
+            customerPaid: event.cod_amount,
+          };
+        }
+      } else if (status === "cancelled") {
+        newStatus = "cancelled";
+        activityLabel = "Cancelled (Steadfast Webhook)";
+        order.cancellation = {
+          ...order.cancellation,
+          cancelledAt: event.updated_at || now,
+          cancelledBy: "Steadfast Courier",
+          notes: event.tracking_message || "Cancelled via Steadfast webhook",
+        };
+      }
+
+      if (newStatus && order.status !== newStatus) {
+        order.status = newStatus;
+      }
+
+      order.activity = [
+        ...(order.activity || []),
+        {
+          id: crypto.randomUUID(),
+          at: now,
+          label: activityLabel,
+          detail: activityDetail,
+          by: "Steadfast",
+        },
+      ];
+      order.updatedAt = now;
+
+      await client.query(
+        `update app_records 
+         set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = 'steadfast_webhook' 
+         where collection = 'orders' and id = $1`,
+        [order.id, JSON.stringify(order)]
+      );
+
+      await bumpRev(client, "orders");
+      console.log(`Updated order ${invoice} with courier charge ${delivery_charge} and status ${status}`);
+    });
+  } catch (err) {
+    console.error(`Failed to update order ${invoice}:`, err);
+    return new NextResponse("Internal Server Error", { status: 500 });
   }
 
   return NextResponse.json({ status: "success" });

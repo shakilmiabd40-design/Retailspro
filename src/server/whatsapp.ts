@@ -14,14 +14,16 @@ export function formatPhoneForWhatsApp(phone: string): string {
 }
 
 /**
- * Sends a raw WhatsApp message via the local whatsapp-bridge (port 3002).
+ * Sends a raw WhatsApp message via the whatsapp-bridge (Render or local fallback).
  */
 export async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
   const formattedPhone = formatPhoneForWhatsApp(phone);
   if (!formattedPhone) return false;
 
+  const baseUrl = process.env.WHATSAPP_BRIDGE_URL || "http://localhost:3002";
+
   try {
-    const res = await fetch("http://localhost:3002/send", {
+    const res = await fetch(`${baseUrl}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phone: formattedPhone, message }),
@@ -36,7 +38,7 @@ export async function sendWhatsAppMessage(phone: string, message: string): Promi
     console.log(`[WhatsApp] Message successfully sent to ${formattedPhone}`);
     return true;
   } catch (err) {
-    console.error("[WhatsApp] Network error connecting to whatsapp-bridge on port 3002:", err);
+    console.error(`[WhatsApp] Network error connecting to whatsapp-bridge at ${baseUrl}:`, err);
     return false;
   }
 }

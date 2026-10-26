@@ -33,6 +33,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# WhatsApp bridge runtime state. auth_info_baileys contains linked-device keys —
+# committing it lets anyone who can read the repo act as the shop's WhatsApp.
+whatsapp-bridge/auth_info_baileys/
+whatsapp-bridge/qr.png
+whatsapp-bridge/node_modules/
+
 # vercel
 .vercel
 
