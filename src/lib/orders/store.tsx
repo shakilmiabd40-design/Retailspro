@@ -117,7 +117,7 @@ interface OrdersContextValue {
   getOrder: (id: string) => Order | undefined;
   statusCounts: Record<OrderStatus | "all", number>;
   createOrder: (input: NewOrderInput) => { ok: true; order: Order } | { ok: false; error: string };
-  markProcessing: (id: string) => void;
+  markProcessing: (id: string, courierInfo?: Partial<CourierInfo>) => void;
   dispatchOrder: (id: string, input: DispatchInput) => void;
   markDelivered: (id: string, input: DeliveredInput) => void;
   markPartialDelivered: (id: string, input: PartialInput) => void;
@@ -246,10 +246,21 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...updater(o), updatedAt: new Date().toISOString() } : o)));
   }
 
-  function markProcessing(id: string) {
+  function markProcessing(id: string, courierInfo?: Partial<CourierInfo>) {
     const order = getOrder(id);
     if (!order || order.status !== "pending") return;
-    updateOrder(id, (o) => ({ ...o, status: "processing", activity: [...o.activity, activity("Marked Processing")] }));
+    updateOrder(id, (o) => ({
+      ...o,
+      status: "processing",
+      courier: courierInfo ? { ...o.courier, ...courierInfo } : o.courier,
+      activity: [
+        ...o.activity,
+        activity(
+          "Marked Processing",
+          courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined
+        ),
+      ],
+    }));
   }
 
   function dispatchOrder(id: string, input: DispatchInput) {

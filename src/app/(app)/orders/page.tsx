@@ -74,8 +74,8 @@ function OrdersPageInner() {
     return !!n && activeCouriers.some((c) => (c.id === "cr-steadfast" || c.name.trim().toLowerCase() === "steadfast") && c.name.trim().toLowerCase() === n);
   };
 
-  /** Only Processing orders can be handed to a courier. */
-  const isDispatchable = (o: Order) => o.status === "processing";
+  /** Pending or Processing orders can be handed to a courier. */
+  const isDispatchable = (o: Order) => o.status === "pending" || o.status === "processing";
   const selectedOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isDispatchable(o)), [orders, selected]);
 
   const courierCompanies = useMemo(
