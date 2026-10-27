@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { tx } from "@/server/db";
 import { bumpRev } from "@/server/seed";
+import { deliverDue, enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
+import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
 import type { Order, OrderStatus } from "@/lib/orders/types";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +48,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "invalid_payload" }, { status: 400 });
   }
 
-  // 3. Update Order
+  // 3. Update Order & Dispatch Webhooks
+  let queuedEvents = 0;
+  let whatsappNotification: { prev: Order; next: Order } | null = null;
+
   try {
     await tx(async (client) => {
       // Find the order by orderNumber (invoice)
@@ -63,6 +68,8 @@ export async function POST(req: NextRequest) {
       }
 
       const row = res.rows[0];
+      // Clone previous order state for accurate diffing
+      const prevOrder: Order = JSON.parse(JSON.stringify(row.data));
       const order: Order = row.data;
       const now = new Date().toISOString();
 
@@ -133,8 +140,31 @@ export async function POST(req: NextRequest) {
       );
 
       await bumpRev(client, "orders");
-      console.log(`Updated order ${invoice} with courier charge ${delivery_charge} and status ${status}`);
+
+      // Generate outgoing events for website webhooks (order.updated, order.status_changed, etc.)
+      const events = orderEvents(prevOrder, order);
+      if (events.length > 0) {
+        queuedEvents = await enqueueEvents(client, events);
+      }
+
+      // Track WhatsApp notification if status changed
+      if (prevOrder.status !== order.status) {
+        whatsappNotification = { prev: prevOrder, next: JSON.parse(JSON.stringify(order)) };
+      }
+
+      console.log(`Updated order ${invoice} with courier charge ${delivery_charge} and status ${status}. Enqueued ${queuedEvents} webhook events.`);
     });
+
+    // Deliver outgoing webhooks to connected website(s) in background
+    if (queuedEvents > 0) {
+      after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+    }
+
+    // Trigger WhatsApp notification in background if configured
+    if (whatsappNotification) {
+      const { prev, next } = whatsappNotification;
+      after(() => handleOrderStatusWhatsAppNotification(prev, next).catch((e) => console.error("[WhatsApp] notification failed", e)));
+    }
   } catch (err) {
     console.error(`Failed to update order ${invoice}:`, err);
     return new NextResponse("Internal Server Error", { status: 500 });
