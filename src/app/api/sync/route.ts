@@ -125,10 +125,15 @@ export const POST = route(async (req) => {
         try {
           if (name === "orders") {
             for (const u of upserts) {
-              events.push(...orderEvents(before.get(u.id) as Order | undefined, (effective.get(u.id) ?? u.data) as unknown as Order));
+              const prev = before.get(u.id) as Order | undefined;
+              const next = (effective.get(u.id) ?? u.data) as unknown as Order;
+              // Don't send order.created webhooks for orders created inside RetailPro.
+              // Stock changes are synced separately via the products collection.
+              if (!prev) continue;
+              events.push(...orderEvents(prev, next));
               whatsappNotifications.push({
-                prev: before.get(u.id) as Order | undefined,
-                next: (effective.get(u.id) ?? u.data) as unknown as Order,
+                prev,
+                next,
               });
             }
           }
