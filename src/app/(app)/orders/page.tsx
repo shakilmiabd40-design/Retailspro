@@ -31,7 +31,7 @@ const PAGE_SIZES = [20, 50, 100] as const;
 const ALL_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "delivered", "partial_delivered", "refuse_return", "cancelled"];
 
 function OrdersPageInner() {
-  const { orders, deleteOrder, dispatchOrder } = useOrders();
+  const { orders, deleteOrder, dispatchOrder, markProcessing } = useOrders();
   const { settings } = useSettings();
   const showToast = useToast();
   const router = useRouter();
@@ -176,8 +176,7 @@ function OrdersPageInner() {
 
   /**
    * Sends every selected order to Steadfast (create_order), stores the consignment id as its Tracking ID
-   * and marks it In Transit. One parcel at a time, so a single failure never blocks the rest — failed
-   * orders stay selected for a one-click retry, and orders assigned to a different courier are skipped.
+   * and marks it Processing (if Pending) or In Transit (if already Processing). One parcel at a time, so a single failure never blocks the rest.
    */
   async function handleBulkDispatch() {
     const targets = selectedOrders;
@@ -196,20 +195,33 @@ function OrdersPageInner() {
         continue;
       }
       try {
-        const res = await api<{ consignmentId: number; trackingCode: string }>("POST", "/api/courier/steadfast", {
-          invoice: o.orderNumber,
-          recipientName: o.customerName,
-          phone: o.phone,
-          address: [o.address, o.area, o.district].filter(Boolean).join(", "),
-          codAmount: expectedCod(o),
-          description: o.items.map((it) => `${it.qty}x ${it.productName} (${[it.color, it.size].filter(Boolean).join("/")})`).join(", "),
-        });
-        dispatchOrder(o.id, {
-          company: companyName || "Steadfast",
-          trackingId: String(res.consignmentId),
-          dispatchDate: new Date().toISOString().slice(0, 10),
-          forwardCost: o.courier.forwardCost || o.deliveryCharge || 0,
-        });
+        let tracking = o.courier?.trackingId;
+        // If it doesn't have a tracking ID yet, create consignment with Steadfast
+        if (!tracking) {
+          const res = await api<{ consignmentId: number; trackingCode: string }>("POST", "/api/courier/steadfast", {
+            invoice: o.orderNumber,
+            recipientName: o.customerName,
+            phone: o.phone,
+            address: [o.address, o.area, o.district].filter(Boolean).join(", "),
+            codAmount: expectedCod(o),
+            description: o.items.map((it) => `${it.qty}x ${it.productName} (${[it.color, it.size].filter(Boolean).join("/")})`).join(", "),
+          });
+          tracking = String(res.consignmentId);
+        }
+
+        if (o.status === "pending") {
+          markProcessing(o.id, {
+            company: companyName || "Steadfast",
+            trackingId: tracking,
+          });
+        } else {
+          dispatchOrder(o.id, {
+            company: companyName || "Steadfast",
+            trackingId: tracking,
+            dispatchDate: new Date().toISOString().slice(0, 10),
+            forwardCost: o.courier.forwardCost || o.deliveryCharge || 0,
+          });
+        }
         sent++;
       } catch (err) {
         problems.push(`#${o.orderNumber}: ${err instanceof Error ? err.message : "couldn't create the consignment"}`);
@@ -221,7 +233,7 @@ function OrdersPageInner() {
     setConfirmBulk(false);
     // Drop the successful ones from the selection; anything unresolved stays ticked for one-click retry.
     setSelected(new Set(unresolved));
-    if (sent) showToast(`${sent} parcel${sent === 1 ? "" : "s"} sent to Steadfast and marked In Transit`, "success");
+    if (sent) showToast(`${sent} parcel${sent === 1 ? "" : "s"} sent to Steadfast and moved forward`, "success");
     if (problems.length) showToast(problems.length === 1 ? problems[0] : `${problems.length} orders weren't sent — ${problems[0]}`, "error");
   }
 
@@ -562,8 +574,8 @@ function OrdersPageInner() {
       <UpdateStatusModal order={statusTarget} open={!!statusTarget} onClose={() => setStatusTarget(null)} />
       <ConfirmDialog
         open={confirmBulk}
-        title="Dispatch to Steadfast"
-        message={`Create a Steadfast consignment for each of the ${selectedOrders.length} selected order(s) (COD total ${formatTaka(selectedOrders.reduce((s, o) => s + expectedCod(o), 0), 2)}) and mark them In Transit? Each parcel is sent one at a time; anything that fails stays selected so you can retry.`}
+        title="Send to Steadfast"
+        message={`Create a Steadfast consignment for each of the ${selectedOrders.length} selected order(s) (COD total ${formatTaka(selectedOrders.reduce((s, o) => s + expectedCod(o), 0), 2)}) and move pending orders to Processing? Each parcel is sent one at a time; anything that fails stays selected so you can retry.`}
         confirmLabel="Send to Steadfast"
         onCancel={() => setConfirmBulk(false)}
         onConfirm={handleBulkDispatch}
