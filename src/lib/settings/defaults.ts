@@ -103,6 +103,8 @@ export const DEFAULT_SETTINGS: SettingsData = {
       apiSecret: "",
       baseUrl: "https://portal.packzy.com/api/v1",
     },
+    codChargePct: 1,
+    riskManagementPct: 0,
   },
   purchase: {
     transitions: DEFAULT_TRANSITIONS,

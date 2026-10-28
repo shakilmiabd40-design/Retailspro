@@ -50,6 +50,8 @@ function applyToRuntime(s: SettingsData) {
     lowStockThreshold: s.inventory.lowStockThreshold,
     cancelAllowed: s.orders.cancelAllowedStatuses,
     settlementMode: s.courier.settlementMode,
+    codChargePct: s.courier.codChargePct,
+    riskManagementPct: s.courier.riskManagementPct,
   });
 }
 

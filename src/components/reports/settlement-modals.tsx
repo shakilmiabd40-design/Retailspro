@@ -221,6 +221,9 @@ export function EditExpectedModal({ row, onClose }: { row: SettlementRow; onClos
   const [expected, setExpected] = useState(String(row.expected));
   const [note, setNote] = useState(row.note ?? "");
 
+  const { settings } = useSettings();
+  const totalFeesPct = (settings.courier.codChargePct || 0) + (settings.courier.riskManagementPct || 0);
+
   function save() {
     const n = Number(expected);
     if (expected.trim() === "" || !Number.isFinite(n) || n < 0) {
@@ -236,9 +239,17 @@ export function EditExpectedModal({ row, onClose }: { row: SettlementRow; onClos
   return (
     <Shell title={`Settlement · #${row.order.orderNumber}`} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
-          Calculated expected amount: <b style={{ color: "var(--text)" }}>{taka(row.policyExpected)}</b> (collected − courier cost). Change it if this courier pays differently.
-        </p>
+        <div className="space-y-1.5 rounded-xl border p-3 text-[12.5px]" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+          <div className="flex justify-between text-[13px] font-semibold" style={{ color: "var(--text)" }}>
+            <span>Calculated Expected</span>
+            <span>{taka(row.policyExpected)}</span>
+          </div>
+          <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+            Formula: Collected − Courier Cost
+            {totalFeesPct > 0 && ` − ${totalFeesPct}% Fees`}
+          </p>
+        </div>
+
         <Field label="Expected settlement (৳)">
           <input type="number" min={0} value={expected} onChange={(e) => setExpected(e.target.value)} className={inputClass} style={inputStyle} />
         </Field>

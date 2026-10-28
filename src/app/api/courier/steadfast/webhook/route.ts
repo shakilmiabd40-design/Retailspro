@@ -99,6 +99,11 @@ export async function POST(req: NextRequest) {
       } else if (status === "partial_delivered") {
         newStatus = "partial_delivered";
         activityLabel = "Marked Partial Delivered (Steadfast Webhook)";
+        order.returnInfo = {
+          ...order.returnInfo,
+          returnRequired: true,
+          returnReceived: false,
+        };
         if (typeof event.cod_amount === "number") {
           order.delivery = {
             ...order.delivery,

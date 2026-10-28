@@ -10,7 +10,7 @@ import { EmptyRow, Divided, Field, FormShell, GhostButton, LockedTag, Modal, Num
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 const MODES: { value: SettlementMode; label: string; description: string }[] = [
-  { value: "auto", label: "Auto expected", description: "Expected settlement is always calculated from the order (collected − courier cost). No manual changes." },
+  { value: "auto", label: "Auto expected", description: "Expected settlement is always calculated from the order (collected − courier cost − COD/risk fees). No manual changes." },
   { value: "manual", label: "Manual expected", description: "Nothing is expected until someone types the amount for each order." },
   { value: "auto_override", label: "Auto + allow override (recommended)", description: "Calculated by default; an admin can override the expected amount when a courier's payout differs." },
 ];
@@ -175,6 +175,20 @@ function CourierForm() {
           <Tag tone="blue">Forward cost</Tag> + <Tag tone="blue">Return cost</Tag> + <Tag tone="blue">Other fees</Tag> = <Tag tone="brand">Actual courier cost</Tag>
           <LockedTag />
         </div>
+      </Section>
+
+      <Section title="Courier Fees (Deductions)" description="Extra percentages the courier company deducts from the collected COD amount before paying you.">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="COD Charge (%)" hint="Percentage of the collected COD amount.">
+            <NumberInput value={draft.codChargePct} onChange={(v) => set("codChargePct", v)} />
+          </Field>
+          <Field label="Risk Management Charge (%)" hint="Insurance / safety fee on the COD amount.">
+            <NumberInput value={draft.riskManagementPct} onChange={(v) => set("riskManagementPct", v)} />
+          </Field>
+        </div>
+        <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>
+          These are deducted during settlement calculation: Expected = Collected − Courier Cost − (Collected × {((draft.codChargePct || 0) + (draft.riskManagementPct || 0)).toFixed(1)}%).
+        </p>
       </Section>
 
       <Section title="Partial Delivered / Refuse Return policy" description="How courier profit and loss are worked out. Shown here so admins and developers see the same rules.">

@@ -166,6 +166,10 @@ export interface CourierSettings {
   allowMultiOrderPayout: boolean;
   requirePayoutReference: boolean;
   steadfast: SteadfastSettings;
+  /** Percentage deducted from the COD amount for Cash on Delivery service. */
+  codChargePct: number;
+  /** Percentage deducted from the COD amount for insurance/risk management. */
+  riskManagementPct: number;
 }
 
 export type POStatusKey = "draft" | "approved" | "sent" | "partially_received" | "received" | "cancelled";

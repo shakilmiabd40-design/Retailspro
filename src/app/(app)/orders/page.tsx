@@ -3,8 +3,9 @@
 import { Suspense, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Plus, Printer, Eye, Pencil, Trash2, RefreshCcw, Ban, ChevronLeft, ChevronRight, X, Truck } from "lucide-react";
+import { Search, Plus, Printer, Eye, Pencil, Trash2, RefreshCcw, Ban, ChevronLeft, ChevronRight, X, Truck, CheckCircle2 } from "lucide-react";
 import { useOrders } from "@/lib/orders/store";
+import { useSettlements } from "@/lib/settlements/store";
 import { useToast } from "@/components/toast";
 import { useSettings } from "@/lib/settings/store";
 import { api } from "@/lib/persist/api";
@@ -32,6 +33,7 @@ const ALL_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "del
 
 function OrdersPageInner() {
   const { orders, deleteOrder, dispatchOrder, markProcessing } = useOrders();
+  const { getRow, recordPayout } = useSettlements();
   const { settings } = useSettings();
   const showToast = useToast();
   const router = useRouter();
@@ -60,9 +62,11 @@ function OrdersPageInner() {
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
 
-  // Bulk dispatch to Steadfast (Settings → Courier & Settlement → Steadfast API).
+  // Bulk dispatch & bulk settlement
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmBulkSettle, setConfirmBulkSettle] = useState(false);
+  const [settling, setSettling] = useState(false);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -77,6 +81,17 @@ function OrdersPageInner() {
   /** Pending or Processing orders can be handed to a courier. */
   const isDispatchable = (o: Order) => o.status === "pending" || o.status === "processing";
   const selectedOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isDispatchable(o)), [orders, selected]);
+
+  /** Delivered or Partial Delivered orders with pending settlement can be settled. Fully settled cannot be re-settled. */
+  const isSettlable = (o: Order) => {
+    if (o.status !== "delivered" && o.status !== "partial_delivered") return false;
+    const r = getRow(o.id);
+    if (!r) return o.delivery.settlementStatus !== "settled";
+    return r.status !== "Settled" && r.pending > 0;
+  };
+
+  const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o);
+  const selectedSettlableOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isSettlable(o)), [orders, selected]);
 
   const courierCompanies = useMemo(
     () => Array.from(new Set(orders.map((o) => o.courier.company).filter(Boolean))).sort(),
@@ -149,8 +164,8 @@ function OrdersPageInner() {
     router.push(`/orders/${order.id}/invoice`);
   }
 
-  const pageDispatchableIds = pageItems.filter(isDispatchable).map((o) => o.id);
-  const allPageChecked = pageDispatchableIds.length > 0 && pageDispatchableIds.every((id) => selected.has(id));
+  const pageSelectableIds = pageItems.filter(isSelectable).map((o) => o.id);
+  const allPageChecked = pageSelectableIds.length > 0 && pageSelectableIds.every((id) => selected.has(id));
 
   function toggleSelected(id: string) {
     setSelected((s) => {
@@ -161,12 +176,12 @@ function OrdersPageInner() {
     });
   }
 
-  /** Header checkbox: selects/deselects every Processing order on the current page. */
+  /** Header checkbox: selects/deselects every selectable order on the current page. */
   function togglePageSelection() {
     setSelected((s) => {
       const next = new Set(s);
-      const allOn = pageDispatchableIds.length > 0 && pageDispatchableIds.every((id) => next.has(id));
-      for (const id of pageDispatchableIds) {
+      const allOn = pageSelectableIds.length > 0 && pageSelectableIds.every((id) => next.has(id));
+      for (const id of pageSelectableIds) {
         if (allOn) next.delete(id);
         else next.add(id);
       }
@@ -237,12 +252,78 @@ function OrdersPageInner() {
     if (problems.length) showToast(problems.length === 1 ? problems[0] : `${problems.length} orders weren't sent — ${problems[0]}`, "error");
   }
 
+  /**
+   * Bulk settles all selected delivered/partial orders that still have pending settlement balance.
+   */
+  async function handleBulkSettlement() {
+    const targets = selectedSettlableOrders;
+    if (!targets.length || settling) return;
+    setSettling(true);
+
+    try {
+      // Group by courier company
+      const byCourier = new Map<string, { total: number; allocations: { orderId: string; amount: number }[] }>();
+
+      for (const o of targets) {
+        const courierName = o.courier.company || "Steadfast";
+        const row = getRow(o.id);
+        const pendingAmount = row ? row.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0));
+        if (pendingAmount <= 0) continue;
+
+        const cur = byCourier.get(courierName) ?? { total: 0, allocations: [] };
+        cur.total += pendingAmount;
+        cur.allocations.push({ orderId: o.id, amount: pendingAmount });
+        byCourier.set(courierName, cur);
+      }
+
+      let settledCount = 0;
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const [courierName, group] of byCourier) {
+        if (group.total <= 0) continue;
+        const result = recordPayout({
+          courier: courierName,
+          amount: group.total,
+          paidDate: today,
+          reference: "Bulk settlement",
+          allocations: group.allocations,
+        });
+
+        if (result.ok) {
+          settledCount += group.allocations.length;
+        } else {
+          showToast(`Settlement error for ${courierName}: ${result.error}`, "error");
+        }
+      }
+
+      setSelected(new Set());
+      setConfirmBulkSettle(false);
+      if (settledCount > 0) {
+        showToast(`${settledCount} order(s) successfully marked as Settled`, "success");
+      }
+    } catch (e) {
+      showToast((e as Error)?.message || "Failed to record bulk settlement", "error");
+    } finally {
+      setSettling(false);
+    }
+  }
+
   function rowActionsFor(order: Order): RowAction[] {
     const actions: RowAction[] = [
       { label: "View", icon: Eye, onClick: () => router.push(`/orders/${order.id}`) },
     ];
     if (!isFinalStatus(order.status)) {
       actions.push({ label: "Update Status", icon: RefreshCcw, onClick: () => setStatusTarget(order) });
+    }
+    if (isSettlable(order)) {
+      actions.push({
+        label: "Mark as Settled",
+        icon: CheckCircle2,
+        onClick: () => {
+          setSelected(new Set([order.id]));
+          setConfirmBulkSettle(true);
+        },
+      });
     }
     if (canCancelOrder(order.status)) {
       actions.push({ label: "Cancel Order", icon: Ban, danger: true, onClick: () => setCancelTarget(order) });
@@ -277,14 +358,14 @@ function OrdersPageInner() {
 
       {/* Operational summary */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
-        <SummaryTile label="Total Orders" value={String(operational.total)} />
-        <SummaryTile label="Pending" value={String(operational.pending)} />
-        <SummaryTile label="Processing" value={String(operational.processing)} accent="var(--brand)" />
-        <SummaryTile label="In Transit" value={String(operational.in_transit)} accent="var(--blue)" />
-        <SummaryTile label="Delivered" value={String(operational.delivered)} accent="var(--green)" />
-        <SummaryTile label="Partial" value={String(operational.partial_delivered)} accent="#b45309" />
-        <SummaryTile label="Refuse" value={String(operational.refuse_return)} accent="var(--red)" />
-        <SummaryTile label="Cancelled" value={String(operational.cancelled)} accent="var(--text-faint)" />
+        <SummaryTile label="Total Orders" value={String(operational.total)} active={status === "all"} onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Pending" value={String(operational.pending)} active={status === "pending"} onClick={() => { setStatus("pending"); setPage(1); }} />
+        <SummaryTile label="Processing" value={String(operational.processing)} accent="var(--brand)" active={status === "processing"} onClick={() => { setStatus("processing"); setPage(1); }} />
+        <SummaryTile label="In Transit" value={String(operational.in_transit)} accent="var(--blue)" active={status === "in_transit"} onClick={() => { setStatus("in_transit"); setPage(1); }} />
+        <SummaryTile label="Delivered" value={String(operational.delivered)} accent="var(--green)" active={status === "delivered"} onClick={() => { setStatus("delivered"); setPage(1); }} />
+        <SummaryTile label="Partial" value={String(operational.partial_delivered)} accent="#b45309" active={status === "partial_delivered"} onClick={() => { setStatus("partial_delivered"); setPage(1); }} />
+        <SummaryTile label="Refuse" value={String(operational.refuse_return)} accent="var(--red)" active={status === "refuse_return"} onClick={() => { setStatus("refuse_return"); setPage(1); }} />
+        <SummaryTile label="Cancelled" value={String(operational.cancelled)} accent="var(--text-faint)" active={status === "cancelled"} onClick={() => { setStatus("cancelled"); setPage(1); }} />
       </div>
 
       {/* Financial summary */}
@@ -393,30 +474,53 @@ function OrdersPageInner() {
         )}
       </div>
 
-      {/* Bulk dispatch bar (Steadfast) */}
+      {/* Bulk action bar (Steadfast dispatch or Settlement) */}
       {selected.size > 0 && (
         <div className="card flex flex-wrap items-center justify-between gap-3 p-3.5">
-          <p className="text-[13px]" style={{ color: "var(--text)" }}>
-            <b>{selectedOrders.length}</b> order{selectedOrders.length === 1 ? "" : "s"} selected
-            <span className="ml-2 text-[12px]" style={{ color: "var(--text-faint)" }}>
-              COD total {formatTaka(selectedOrders.reduce((s, o) => s + expectedCod(o), 0), 2)}
-            </span>
-          </p>
+          <div className="text-[13px]" style={{ color: "var(--text)" }}>
+            <b>{selected.size}</b> order{selected.size === 1 ? "" : "s"} selected
+            {selectedOrders.length > 0 && (
+              <span className="ml-2 text-[12px]" style={{ color: "var(--text-faint)" }}>
+                Dispatchable: {selectedOrders.length} (COD {formatTaka(selectedOrders.reduce((s, o) => s + expectedCod(o), 0), 2)})
+              </span>
+            )}
+            {selectedSettlableOrders.length > 0 && (
+              <span className="ml-2 text-[12px]" style={{ color: "var(--brand)" }}>
+                Settable: {selectedSettlableOrders.length} (Pending {formatTaka(selectedSettlableOrders.reduce((s, o) => {
+                  const r = getRow(o.id);
+                  return s + (r ? r.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0)));
+                }, 0), 2)})
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setSelected(new Set())} className="focus-ring rounded-xl border px-3 py-2 text-[12.5px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
               Clear
             </button>
-            <button
-              onClick={() => setConfirmBulk(true)}
-              disabled={dispatching || !steadfastEnabled || selectedOrders.length === 0}
-              className="focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
-              style={{ background: "var(--brand)" }}
-            >
-              <Truck size={15} />
-              {dispatching && dispatchProgress ? `Sending ${dispatchProgress.done + 1}/${dispatchProgress.total}…` : `Dispatch to Steadfast (${selectedOrders.length})`}
-            </button>
+            {selectedOrders.length > 0 && (
+              <button
+                onClick={() => setConfirmBulk(true)}
+                disabled={dispatching || !steadfastEnabled}
+                className="focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+                style={{ background: "var(--brand)" }}
+              >
+                <Truck size={15} />
+                {dispatching && dispatchProgress ? `Sending ${dispatchProgress.done + 1}/${dispatchProgress.total}…` : `Send to Steadfast (${selectedOrders.length})`}
+              </button>
+            )}
+            {selectedSettlableOrders.length > 0 && (
+              <button
+                onClick={() => setConfirmBulkSettle(true)}
+                disabled={settling}
+                className="focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+                style={{ background: "var(--green)" }}
+              >
+                <CheckCircle2 size={15} />
+                {settling ? "Recording settlement..." : `Mark as Settled (${selectedSettlableOrders.length})`}
+              </button>
+            )}
           </div>
-          {!steadfastEnabled && (
+          {!steadfastEnabled && selectedOrders.length > 0 && (
             <p className="w-full text-[12px]" style={{ color: "var(--text-faint)" }}>
               Bulk dispatch is off — enable the Steadfast integration under Settings → Courier & Settlement → Steadfast API.
             </p>
@@ -435,8 +539,8 @@ function OrdersPageInner() {
                     type="checkbox"
                     checked={allPageChecked}
                     onChange={togglePageSelection}
-                    disabled={pageDispatchableIds.length === 0}
-                    aria-label="Select all processing orders on this page"
+                    disabled={pageSelectableIds.length === 0}
+                    aria-label="Select all eligible orders on this page"
                     className="accent-[var(--brand)]"
                   />
                 </th>
@@ -448,23 +552,31 @@ function OrdersPageInner() {
                 <th className="px-3 py-3 font-medium">Courier</th>
                 <th className="px-3 py-3 font-medium">Courier Cost</th>
                 <th className="px-3 py-3 font-medium">Status</th>
+                <th className="px-3 py-3 font-medium">Settlement</th>
                 <th className="px-3 py-3 font-medium">Date</th>
                 <th className="w-10 px-3 py-3" />
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((o) => (
-                <tr key={o.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}>
-                  <td className="px-3 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(o.id)}
-                      onChange={() => toggleSelected(o.id)}
-                      disabled={!isDispatchable(o)}
-                      aria-label={`Select order #${o.orderNumber}`}
-                      className="accent-[var(--brand)] disabled:opacity-30"
-                    />
-                  </td>
+              {pageItems.map((o) => {
+                const sRow = getRow(o.id);
+                const sStatus = sRow ? sRow.status : (o.delivery.settlementStatus === "settled" ? "Settled" : "Unsettled");
+                const isFullySettled = sStatus === "Settled";
+                const isDeliveredOrPartial = o.status === "delivered" || o.status === "partial_delivered";
+
+                return (
+                  <tr key={o.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}>
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(o.id)}
+                        onChange={() => toggleSelected(o.id)}
+                        disabled={!isSelectable(o)}
+                        aria-label={`Select order #${o.orderNumber}`}
+                        title={isFullySettled ? "This order is already fully settled" : undefined}
+                        className="accent-[var(--brand)] disabled:opacity-30"
+                      />
+                    </td>
                   <td className="px-3 py-3">
                     <Link href={`/orders/${o.id}`} className="text-[13px] font-medium hover:underline" style={{ color: "var(--text)" }}>
                       #{o.orderNumber}
@@ -503,6 +615,21 @@ function OrdersPageInner() {
                   <td className="px-3 py-3">
                     <OrderStatusBadge status={o.status} />
                   </td>
+                  <td className="px-3 py-3">
+                    {isDeliveredOrPartial ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
+                        style={{
+                          color: isFullySettled ? "var(--green)" : sStatus === "Partially Settled" ? "var(--blue)" : "#b45309",
+                          background: isFullySettled ? "var(--green-soft)" : sStatus === "Partially Settled" ? "var(--blue-soft)" : "rgba(180, 83, 9, 0.14)",
+                        }}
+                      >
+                        {isFullySettled ? "✓ Settled" : sStatus === "Partially Settled" ? `Partial (Pending: ৳${sRow?.pending ?? 0})` : "Unsettled"}
+                      </span>
+                    ) : (
+                      <span className="text-[11.5px]" style={{ color: "var(--text-faint)" }}>—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>
                     {new Date(o.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </td>
@@ -510,7 +637,8 @@ function OrdersPageInner() {
                     <RowActionsMenu actions={rowActionsFor(o)} />
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
 
@@ -581,6 +709,17 @@ function OrdersPageInner() {
         onConfirm={handleBulkDispatch}
       />
       <ConfirmDialog
+        open={confirmBulkSettle}
+        title="Mark as Settled (Bulk)"
+        message={`Record settlement for ${selectedSettlableOrders.length} order(s) with total pending amount of ${formatTaka(selectedSettlableOrders.reduce((s, o) => {
+          const r = getRow(o.id);
+          return s + (r ? r.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0)));
+        }, 0), 2)}? These orders will be marked as Settled and cannot be settled again.`}
+        confirmLabel="Confirm Settlement"
+        onCancel={() => setConfirmBulkSettle(false)}
+        onConfirm={handleBulkSettlement}
+      />
+      <ConfirmDialog
         open={!!deleteTarget}
         title={deleteTarget ? `Delete order #${deleteTarget.orderNumber}` : "Delete order"}
         message="This permanently removes the order. Reserved stock is released, sold stock is put back, and any warranties for it are voided. This can't be undone."
@@ -598,16 +737,26 @@ function OrdersPageInner() {
   );
 }
 
-function SummaryTile({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function SummaryTile({ label, value, accent, active, onClick }: { label: string; value: string; accent?: string; active?: boolean; onClick?: () => void }) {
   return (
-    <div className="card p-3.5">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`card p-3.5 text-left transition-all ${onClick ? "cursor-pointer hover:border-[var(--brand)] focus-ring" : ""}`}
+      style={{
+        borderColor: active ? "var(--brand)" : undefined,
+        boxShadow: active ? "0 0 0 1px var(--brand)" : undefined,
+        width: "100%",
+      }}
+    >
       <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
         {label}
       </p>
       <p className="mt-1 text-[16px] font-semibold" style={{ color: accent ?? "var(--text)" }}>
         {value}
       </p>
-    </div>
+    </button>
   );
 }
 

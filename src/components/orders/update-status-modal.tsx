@@ -344,6 +344,27 @@ export function UpdateStatusModal({
                     </select>
                   </Field>
                 </div>
+                <div className="rounded-xl border p-3 text-[12.5px]" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+                  <div className="flex justify-between">
+                    <span style={{ color: "var(--text-muted)" }}>Expected Settlement</span>
+                    <span style={{ color: "var(--text)", fontWeight: 600 }}>
+                      {formatTaka(
+                        Math.max(
+                          0,
+                          customerPaid -
+                            forwardCharge -
+                            (customerPaid * ((settings.courier.codChargePct || 0) + (settings.courier.riskManagementPct || 0))) / 100
+                        ),
+                        2
+                      )}
+                    </span>
+                  </div>
+                  {((settings.courier.codChargePct || 0) + (settings.courier.riskManagementPct || 0)) > 0 && (
+                    <p className="mt-1 text-[11px]" style={{ color: "var(--text-faint)" }}>
+                      Includes {settings.courier.codChargePct || 0}% COD &amp; {settings.courier.riskManagementPct || 0}% Risk fee deductions.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 

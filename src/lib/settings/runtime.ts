@@ -17,6 +17,8 @@ export interface RuntimeConfig {
   lowStockThreshold: number;
   cancelAllowed: string[];
   settlementMode: SettlementMode;
+  codChargePct: number;
+  riskManagementPct: number;
   /** Who is acting right now — stamped onto activity / audit entries. */
   actor: { id: string; name: string };
 }
@@ -29,6 +31,8 @@ export const runtime: RuntimeConfig = {
   lowStockThreshold: 10,
   cancelAllowed: ["pending", "processing"],
   settlementMode: "auto_override",
+  codChargePct: 1,
+  riskManagementPct: 0,
   actor: { id: "system", name: "System" },
 };
 

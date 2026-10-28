@@ -32,9 +32,14 @@ export function buildAllocationIndex(payouts: CourierPayout[]): AllocationIndex 
  *  Refuse / Cancelled → 0. Never below 0. Admins can override per order.
  */
 export function policyExpected(order: Order): number {
-  if (order.status === "delivered") return Math.max(0, collectedAmount(order) - actualCourierCost(order));
-  if (order.status === "partial_delivered") return Math.max(0, order.delivery.customerPaid - actualCourierCost(order));
-  return 0;
+  const collected = order.status === "delivered" ? collectedAmount(order) : order.delivery.customerPaid;
+  if (order.status !== "delivered" && order.status !== "partial_delivered") return 0;
+
+  const cost = actualCourierCost(order);
+  const codCharge = (collected * (runtime.codChargePct || 0)) / 100;
+  const riskCharge = (collected * (runtime.riskManagementPct || 0)) / 100;
+
+  return Math.max(0, collected - cost - codCharge - riskCharge);
 }
 
 export interface SettlementRow {
