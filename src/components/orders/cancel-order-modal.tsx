@@ -37,7 +37,7 @@ export function CancelOrderModal({
       showToast("Please add a note explaining the cancellation", "error");
       return;
     }
-    const result = cancelOrder(order.id, { reason, notes });
+    const result = cancelOrder(order.id, { reason, notes: notes.trim() });
     if (!result.ok) {
       showToast(result.error, "error");
       return;
