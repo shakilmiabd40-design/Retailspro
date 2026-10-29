@@ -53,12 +53,6 @@ export function toApiProduct(p: Product) {
 }
 export type ApiProduct = ReturnType<typeof toApiProduct>;
 
-export function mapApiOrderStatus(status: Order["status"]): string {
-  if (status === "partial_delivered" || status === "refuse_return") return "return";
-  if (status === "cancelled") return "cancel";
-  return status;
-}
-
 export function toApiOrder(o: Order) {
   const subtotal = o.items.reduce((s, i) => s + i.price * i.qty, 0);
   const discountTotal = o.items.reduce((s, i) => s + i.discount, 0);
@@ -69,7 +63,7 @@ export function toApiOrder(o: Order) {
     order_number: o.orderNumber,
     external_id: o.externalId ?? null,
     channel: o.channel ?? (o.source === "pos" ? "pos" : "dashboard"),
-    status: mapApiOrderStatus(o.status),
+    status: o.status,
     customer: {
       name: o.customerName,
       phone: o.phone,

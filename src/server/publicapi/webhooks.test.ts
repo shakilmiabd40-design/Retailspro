@@ -5,7 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { sign, isEventType, validateWebhookUrl, EVENT_TYPES } from "./webhooks";
+import { sign, isEventType, validateWebhookUrl, orderEvents, EVENT_TYPES } from "./webhooks";
+import type { Order } from "@/lib/orders/types";
 
 /** NODE_ENV is typed read-only, but the SSRF guard branches on it, so tests need to flip it. */
 const withNodeEnv = (value: string, fn: () => void) => {
@@ -57,6 +58,37 @@ test("isEventType accepts every documented event and rejects anything else", () 
   assert.equal(isEventType("order.deleted"), false);
   assert.equal(isEventType(""), false);
   assert.equal(isEventType(123), false);
+});
+
+/** Minimal order object: toApiOrder only reads these fields. */
+const order = (overrides: Partial<Order>): Order =>
+  ({
+    id: "ord_1",
+    orderNumber: "ORD-1001",
+    status: "pending",
+    customerName: "Rahim",
+    phone: "01712345678",
+    address: "Dhaka",
+    items: [{ id: "line_1", productId: "p_1", productName: "Shoe", variantId: "v_1", color: "Black", size: "42", sku: "SH-1", price: 1000, qty: 1, discount: 0 }],
+    deliveryCharge: 60,
+    courier: { company: "", trackingId: "", forwardCost: 0, returnCost: 0, otherCost: 0 },
+    delivery: { customerPaid: 0 },
+    returnInfo: { returnRequired: false, returnReceived: false },
+    cancellation: {},
+    activity: [],
+    createdAt: "2026-09-01T00:00:00.000Z",
+    updatedAt: "2026-09-01T00:00:00.000Z",
+    ...overrides,
+  }) as Order;
+
+test("order webhooks send the documented status values (cancelled, partial_delivered, refuse_return)", () => {
+  for (const status of ["cancelled", "partial_delivered", "refuse_return"] as const) {
+    const events = orderEvents(order({ status: "pending" }), order({ status }));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "order.status_changed");
+    assert.equal(events[0].data.previous_status, "pending");
+    assert.equal((events[0].data.order as { status: string }).status, status);
+  }
 });
 
 test("in production validateWebhookUrl requires https and a public address", () => {

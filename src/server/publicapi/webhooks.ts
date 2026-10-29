@@ -8,7 +8,7 @@ import { getShopName } from "../shop";
 import { ApiError } from "../http";
 import type { Order } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
-import { mapApiOrderStatus, toApiOrder, toApiProduct } from "./serialize";
+import { toApiOrder, toApiProduct } from "./serialize";
 import { API_VERSION } from "./http";
 
 /**
@@ -48,7 +48,7 @@ export function orderEvents(prev: Order | undefined | null, next: Order): Domain
   if (!prev) return [{ type: "order.created", data: { order: after } }];
   const before = toApiOrder(prev);
   const changed = changedKeys(before, after, ["timeline", "updated_at"]);
-  if (prev.status !== next.status) return [{ type: "order.status_changed", data: { previous_status: mapApiOrderStatus(prev.status), changed_fields: changed, order: after } }];
+  if (prev.status !== next.status) return [{ type: "order.status_changed", data: { previous_status: prev.status, changed_fields: changed, order: after } }];
   if (changed.length) return [{ type: "order.updated", data: { changed_fields: changed, order: after } }];
   return [];
 }
