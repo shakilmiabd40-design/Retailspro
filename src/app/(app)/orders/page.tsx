@@ -370,11 +370,11 @@ function OrdersPageInner() {
 
       {/* Financial summary */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <SummaryTile label="Total COD" value={formatTaka(financial.totalCod, 2)} onClick={() => {}} />
-        <SummaryTile label="Collected Amount" value={formatTaka(financial.collected, 2)} accent="var(--green)" onClick={() => {}} />
-        <SummaryTile label="Courier Cost" value={formatTaka(financial.courierCost, 2)} onClick={() => {}} />
-        <SummaryTile label="Courier Profit" value={formatTaka(financial.courierProfit, 2)} accent="var(--green)" onClick={() => {}} />
-        <SummaryTile label="Courier Loss" value={formatTaka(financial.courierLoss, 2)} accent="var(--red)" onClick={() => {}} />
+        <SummaryTile label="Total COD" value={formatTaka(financial.totalCod, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Collected Amount" value={formatTaka(financial.collected, 2)} accent="var(--green)" onClick={() => { setStatus("delivered"); setPage(1); }} />
+        <SummaryTile label="Courier Cost" value={formatTaka(financial.courierCost, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Courier Profit" value={formatTaka(financial.courierProfit, 2)} accent="var(--green)" onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Courier Loss" value={formatTaka(financial.courierLoss, 2)} accent="var(--red)" onClick={() => { setStatus("all"); setPage(1); }} />
       </div>
 
       {/* Filters */}
