@@ -358,14 +358,14 @@ function OrdersPageInner() {
 
       {/* Operational summary */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
-        <SummaryTile label="Total Orders" value={String(operational.total)} active={status === "all"} onClick={() => { setStatus("all"); setPage(1); }} />
-        <SummaryTile label="Pending" value={String(operational.pending)} active={status === "pending"} onClick={() => { setStatus("pending"); setPage(1); }} />
-        <SummaryTile label="Processing" value={String(operational.processing)} accent="var(--brand)" active={status === "processing"} onClick={() => { setStatus("processing"); setPage(1); }} />
-        <SummaryTile label="In Transit" value={String(operational.in_transit)} accent="var(--blue)" active={status === "in_transit"} onClick={() => { setStatus("in_transit"); setPage(1); }} />
-        <SummaryTile label="Delivered" value={String(operational.delivered)} accent="var(--green)" active={status === "delivered"} onClick={() => { setStatus("delivered"); setPage(1); }} />
-        <SummaryTile label="Partial" value={String(operational.partial_delivered)} accent="#b45309" active={status === "partial_delivered"} onClick={() => { setStatus("partial_delivered"); setPage(1); }} />
-        <SummaryTile label="Refuse" value={String(operational.refuse_return)} accent="var(--red)" active={status === "refuse_return"} onClick={() => { setStatus("refuse_return"); setPage(1); }} />
-        <SummaryTile label="Cancelled" value={String(operational.cancelled)} accent="var(--text-faint)" active={status === "cancelled"} onClick={() => { setStatus("cancelled"); setPage(1); }} />
+        <SummaryTile label="Total Orders" value={String(operational.total)} active={status === "all"} onClick={() => { router.push("/orders"); setPage(1); }} />
+        <SummaryTile label="Pending" value={String(operational.pending)} active={status === "pending"} onClick={() => { router.push("/orders?status=pending"); setPage(1); }} />
+        <SummaryTile label="Processing" value={String(operational.processing)} accent="var(--brand)" active={status === "processing"} onClick={() => { router.push("/orders?status=processing"); setPage(1); }} />
+        <SummaryTile label="In Transit" value={String(operational.in_transit)} accent="var(--blue)" active={status === "in_transit"} onClick={() => { router.push("/orders?status=in_transit"); setPage(1); }} />
+        <SummaryTile label="Delivered" value={String(operational.delivered)} accent="var(--green)" active={status === "delivered"} onClick={() => { router.push("/orders?status=delivered"); setPage(1); }} />
+        <SummaryTile label="Partial" value={String(operational.partial_delivered)} accent="#b45309" active={status === "partial_delivered"} onClick={() => { router.push("/orders?status=partial_delivered"); setPage(1); }} />
+        <SummaryTile label="Refuse" value={String(operational.refuse_return)} accent="var(--red)" active={status === "refuse_return"} onClick={() => { router.push("/orders?status=refuse_return"); setPage(1); }} />
+        <SummaryTile label="Cancelled" value={String(operational.cancelled)} accent="var(--text-faint)" active={status === "cancelled"} onClick={() => { router.push("/orders?status=cancelled"); setPage(1); }} />
       </div>
 
       {/* Financial summary */}
