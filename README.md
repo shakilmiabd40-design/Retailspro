@@ -269,6 +269,29 @@ requirement that cancelled orders are never deleted.
 Orders are stored in the database like everything else. Choose "Start with sample data" on
 first run to get one sample order per status so every screen has something to show.
 
+### Steadfast courier (automatic status)
+
+Settings → Courier & Settlement → **Steadfast** holds the API key/secret (or set
+`STEADFAST_API_KEY` / `STEADFAST_API_SECRET`); the webhook needs one more variable,
+`STEADFAST_TOKEN` — the **Auth Token** you typed next to the Callback URL in
+Steadfast's own Webhook page. The two must be identical, or every event is rejected
+with 401 and Steadfast never retries a 4xx.
+
+- **Callback URL:** `https://<your-domain>/api/courier/steadfast/webhook`
+- The route accepts either `Authorization: Bearer <token>` (what Steadfast actually
+  sends) or an `X-Signature` HMAC of the raw body, so older and newer accounts both work.
+- Status mapping (`src/server/courier/steadfast-status.ts`): `pending` → In Transit,
+  `delivered` → Delivered, `partial_delivered*` → Partial Delivered, `cancelled*` →
+  Cancelled. `in_review`, `hold`, `unknown` and the unconfirmed `*_approval_pending`
+  stages leave the order in Processing on purpose.
+- If an order looks stale, open it and press **Sync status from Steadfast** — this pulls
+  `status_by_cid` on demand and applies the same mapping, so a missed webhook can be
+  repaired without touching the database. `POST /api/courier/steadfast/sync` with
+  `{ "orderId": "…" }` or `{ "invoice": "ORD-10672" }` does the same from a script.
+- Every event is logged to the server console as `[steadfast] …`, including rejected
+  auth attempts and payloads that match no order — check there first when a status
+  doesn't arrive.
+
 ## Suppliers, Purchase Orders, Returns & Warranty
 
 These four modules round out the inventory side of the spec, and are wired

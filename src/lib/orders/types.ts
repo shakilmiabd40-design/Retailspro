@@ -42,6 +42,8 @@ export interface CourierInfo {
   forwardCost: number;
   returnCost: number;
   otherCost: number;
+  /** Raw status Steadfast last reported for this consignment (e.g. "in_review", "partial_delivered"). */
+  status?: string;
 }
 
 export interface DeliveryResult {

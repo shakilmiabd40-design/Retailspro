@@ -52,6 +52,7 @@ export function UpdateStatusModal({
   const [forwardCost, setForwardCost] = useState(0);
   const [sending, setSending] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // Steadfast integration: Settings → Courier & Settlement → Steadfast API.
   const steadfastEnabled = settings.courier.steadfast?.enabled ?? false;
@@ -197,6 +198,30 @@ export function UpdateStatusModal({
     setChecking(false);
   }
 
+  /**
+   * Pulls the live status from Steadfast and applies it on the server (status, courier charge,
+   * COD). Used when the webhook never reached us — e.g. the Auth Token in the Steadfast panel
+   * doesn't match STEADFAST_TOKEN.
+   */
+  async function handleSyncSteadfast() {
+    if (!order || syncing) return;
+    setSyncing(true);
+    try {
+      const res = await api<{ status: string; changed: boolean; orderStatus: string }>("POST", "/api/courier/steadfast/sync", {
+        orderId: order.id,
+      });
+      const label = String(res.orderStatus ?? "").replace(/_/g, " ");
+      showToast(
+        res.changed ? `Steadfast: ${res.status} — order updated to ${label}` : `Steadfast: ${res.status} — order already up to date`,
+        "success"
+      );
+      onClose();
+    } catch (err) {
+      showToast(`Steadfast: ${err instanceof Error ? err.message : "sync failed"}`, "error");
+    }
+    setSyncing(false);
+  }
+
   function handleConfirmOutcome() {
     if (!order) return;
     if (outcome === "delivered") {
@@ -231,6 +256,25 @@ export function UpdateStatusModal({
             <X size={18} />
           </button>
         </div>
+
+        {steadfastEnabled && !!order.courier.trackingId && !["delivered", "partial_delivered", "refuse_return", "cancelled"].includes(order.status) && (
+          <div className="mb-4 space-y-2">
+            <button
+              onClick={handleSyncSteadfast}
+              disabled={syncing}
+              className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl border py-2 text-[12.5px] font-medium disabled:opacity-60"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface-2)" }}
+            >
+              <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Syncing with Steadfast…" : "Sync status from Steadfast"}
+            </button>
+            {order.courier.status && (
+              <p className="text-[11.5px]" style={{ color: "var(--text-faint)" }}>
+                Steadfast last reported: <b>{order.courier.status.replace(/_/g, " ")}</b>
+              </p>
+            )}
+          </div>
+        )}
 
         {order.status === "pending" && (
           <div className="space-y-4">

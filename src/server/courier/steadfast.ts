@@ -147,3 +147,19 @@ export async function updateSteadfastStatus(consignmentId: number | string, stat
     body: JSON.stringify({ status }),
   });
 }
+
+/** Same shape as getSteadfastConsignment, looked up by the merchant invoice number instead of the consignment id. */
+export async function getSteadfastConsignmentByInvoice(invoice: string): Promise<CallResult<SteadfastConsignment>> {
+  const res = await call<Record<string, unknown>>(`/status_by_invoice/${encodeURIComponent(invoice)}`);
+  if (!res.ok) return res;
+  const raw = res.data;
+  const consignmentObj = (raw.consignment as Record<string, unknown>) || raw;
+  return {
+    ok: true,
+    data: {
+      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
+      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      ...consignmentObj,
+    },
+  };
+}

@@ -1,10 +1,9 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse, after } from "next/server";
 import { tx } from "@/server/db";
-import { bumpRev } from "@/server/seed";
-import { deliverDue, enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
+import { deliverDue } from "@/server/publicapi/webhooks";
 import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
-import type { Order, OrderStatus } from "@/lib/orders/types";
+import { applyStatusToOrder, loadOrderForConsignment } from "@/server/courier/apply-steadfast-status";
 
 export const dynamic = "force-dynamic";
 
@@ -15,175 +14,103 @@ export async function GET() {
   return NextResponse.json({ status: "ok", service: "steadfast-webhook" });
 }
 
+function safeEqual(a: string, b: string) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
 /**
- * Incoming Webhook from Steadfast.
- * Verifies HMAC signature, extracts delivery_charge, and updates the order in the database.
+ * Steadfast authenticates its webhook with `Authorization: Bearer <auth token>` (the token you set
+ * next to the Callback URL in their panel). `X-Signature` (hex HMAC-SHA256 of the raw body, same
+ * token as key) is only sent by newer accounts, so either one is accepted.
+ */
+function authorized(req: NextRequest, rawBody: string, token: string): boolean {
+  const auth = (req.headers.get("authorization") ?? "").trim();
+  if (auth) {
+    const presented = /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, "").trim() : auth;
+    if (presented && safeEqual(presented, token)) return true;
+  }
+  const signature = (req.headers.get("x-signature") ?? "").trim();
+  if (signature) {
+    const expected = crypto.createHmac("sha256", token).update(rawBody).digest("hex");
+    if (safeEqual(signature.toLowerCase(), expected)) return true;
+  }
+  return false;
+}
+
+/**
+ * Incoming webhook from Steadfast.
+ *
+ * Steadfast retries 5xx and silence, but *never* retries a 4xx — so every request that passes the
+ * auth check answers 200, even when the payload is one we can't use. Anything unusable is logged
+ * instead of rejected, so nothing is silently lost.
  */
 export async function POST(req: NextRequest) {
-  const token = process.env.STEADFAST_TOKEN;
+  const token = process.env.STEADFAST_TOKEN?.trim();
   if (!token) {
-    console.error("STEADFAST_TOKEN not configured");
+    console.error("[steadfast] STEADFAST_TOKEN is not set — webhook rejected");
     return new NextResponse("Not Configured", { status: 503 });
   }
 
-  // 1. Verify Signature
-  const signature = req.headers.get("X-Signature") || "";
   const rawBody = await req.text();
-  const expected = crypto.createHmac("sha256", token).update(rawBody).digest("hex");
-
-  if (signature !== expected) {
-    console.error("Steadfast webhook signature mismatch");
+  if (!authorized(req, rawBody, token)) {
+    console.error("[steadfast] webhook auth failed — check the Auth Token in the Steadfast panel matches STEADFAST_TOKEN");
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // 2. Parse Event
-  const event = JSON.parse(rawBody);
-  if (event.notification_type !== "delivery_status") {
-    // Ignore other event types for now
-    return NextResponse.json({ status: "success" });
+  let event: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(rawBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    event = parsed as Record<string, unknown>;
+  } catch {
+    console.error("[steadfast] webhook body was not a JSON object:", rawBody.slice(0, 500));
+    return NextResponse.json({ status: "received" });
   }
 
-  const { invoice, delivery_charge, status } = event;
-  if (!invoice || typeof delivery_charge !== "number") {
-    return NextResponse.json({ status: "invalid_payload" }, { status: 400 });
+  // Older Steadfast accounts push the status without a notification_type at all.
+  const type = typeof event.notification_type === "string" ? event.notification_type.trim().toLowerCase() : "delivery_status";
+  if (type !== "delivery_status" && type !== "tracking_update") {
+    console.log(`[steadfast] ignoring notification_type=${type}`);
+    return NextResponse.json({ status: "received" });
   }
 
-  // 3. Update Order & Dispatch Webhooks
-  let queuedEvents = 0;
-  let whatsappNotification: { prev: Order; next: Order } | null = null;
+  const invoice = typeof event.invoice === "string" ? event.invoice.trim() : "";
+  const consignmentId = event.consignment_id === undefined || event.consignment_id === null ? "" : String(event.consignment_id).trim();
+  if (!invoice && !consignmentId) {
+    console.error("[steadfast] webhook had neither invoice nor consignment_id:", rawBody.slice(0, 500));
+    return NextResponse.json({ status: "received" });
+  }
 
   try {
-    await tx(async (client) => {
-      // Find the order by orderNumber (invoice)
-      const res = await client.query<{ id: string; data: Order }>(
-        `select id, data from app_records 
-         where collection = 'orders' and data->>'orderNumber' = $1 
-         limit 1 for update`,
-        [invoice]
-      );
-
-      if (!res.rows[0]) {
-        console.warn(`Order not found for invoice ${invoice}`);
-        return;
-      }
-
-      const row = res.rows[0];
-      // Clone previous order state for accurate diffing
-      const prevOrder: Order = JSON.parse(JSON.stringify(row.data));
-      const order: Order = row.data;
-      const now = new Date().toISOString();
-
-      // Update forward cost if provided
-      if (typeof delivery_charge === "number") {
-        order.courier = {
-          ...order.courier,
-          forwardCost: delivery_charge,
-        };
-      }
-
-      // Map Steadfast status to RetailPro order status
-      let newStatus: OrderStatus | undefined;
-      let activityLabel = "Courier status update";
-      let activityDetail = `Steadfast status: ${status}`;
-
-      if (status === "delivered") {
-        newStatus = "delivered";
-        activityLabel = "Marked Delivered (Steadfast Webhook)";
-        if (typeof event.cod_amount === "number") {
-          order.delivery = {
-            ...order.delivery,
-            customerPaid: event.cod_amount,
-            deliveryDate: event.updated_at || now,
-          };
-        }
-      } else if (status === "partial_delivered") {
-        newStatus = "partial_delivered";
-        activityLabel = "Marked Partial Delivered (Steadfast Webhook)";
-        order.returnInfo = {
-          ...order.returnInfo,
-          returnRequired: true,
-          returnReceived: false,
-        };
-        if (typeof event.cod_amount === "number") {
-          order.delivery = {
-            ...order.delivery,
-            customerPaid: event.cod_amount,
-          };
-        }
-      } else if (status === "cancelled") {
-        newStatus = "cancelled";
-        activityLabel = "Cancelled (Steadfast Webhook)";
-        order.cancellation = {
-          ...order.cancellation,
-          cancelledAt: event.updated_at || now,
-          cancelledBy: "Steadfast Courier",
-          notes: event.tracking_message || "Cancelled via Steadfast webhook",
-        };
-      } else if (status === "pending" || status === "in_transit") {
-        newStatus = "in_transit";
-        activityLabel = "Marked In Transit (Steadfast Webhook)";
-        if (!order.courier.dispatchDate) {
-          order.courier.dispatchDate = (event.updated_at || now).slice(0, 10);
-        }
-      }
-
-      if (newStatus && order.status !== newStatus) {
-        // Safety: Don't move an order back to "in_transit" if it's already in a final state.
-        const isFinal = ["delivered", "partial_delivered", "refuse_return", "cancelled"].includes(order.status);
-        if (newStatus === "in_transit" && isFinal) {
-          // Keep the final status
-        } else {
-          order.status = newStatus;
-        }
-      }
-
-      order.activity = [
-        ...(order.activity || []),
-        {
-          id: crypto.randomUUID(),
-          at: now,
-          label: activityLabel,
-          detail: activityDetail,
-          by: "Steadfast",
-        },
-      ];
-      order.updatedAt = now;
-
-      await client.query(
-        `update app_records 
-         set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = 'steadfast_webhook' 
-         where collection = 'orders' and id = $1`,
-        [order.id, JSON.stringify(order)]
-      );
-
-      await bumpRev(client, "orders");
-
-      // Generate outgoing events for website webhooks (order.updated, order.status_changed, etc.)
-      const events = orderEvents(prevOrder, order);
-      if (events.length > 0) {
-        queuedEvents = await enqueueEvents(client, events);
-      }
-
-      // Track WhatsApp notification if status changed
-      if (prevOrder.status !== order.status) {
-        whatsappNotification = { prev: prevOrder, next: JSON.parse(JSON.stringify(order)) };
-      }
-
-      console.log(`Updated order ${invoice} with courier charge ${delivery_charge} and status ${status}. Enqueued ${queuedEvents} webhook events.`);
+    const result = await tx(async (client) => {
+      const row = await loadOrderForConsignment(client, { invoice, consignmentId });
+      if (!row) return null;
+      return applyStatusToOrder(client, row, event);
     });
 
-    // Deliver outgoing webhooks to connected website(s) in background
-    if (queuedEvents > 0) {
-      after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+    if (!result) {
+      // Probably an order created outside RetailsPro — acknowledge so Steadfast stops retrying.
+      console.warn(`[steadfast] no order matched invoice=${invoice || "—"} consignment=${consignmentId || "—"}`);
+      return NextResponse.json({ status: "received" });
     }
 
-    // Trigger WhatsApp notification in background if configured
-    if (whatsappNotification) {
-      const { prev, next } = whatsappNotification;
+    if (result.queuedEvents > 0) {
+      after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+    }
+    if (result.whatsapp) {
+      const { prev, next } = result.whatsapp;
       after(() => handleOrderStatusWhatsAppNotification(prev, next).catch((e) => console.error("[WhatsApp] notification failed", e)));
     }
+
+    console.log(
+      `[steadfast] ${invoice || consignmentId}: status=${String(event.status ?? "—")} → ${result.changed ? "updated" : "no change"}` +
+        (result.queuedEvents ? `, ${result.queuedEvents} webhook event(s) queued` : "")
+    );
   } catch (err) {
-    console.error(`Failed to update order ${invoice}:`, err);
+    console.error(`[steadfast] failed to update invoice=${invoice || "—"} consignment=${consignmentId || "—"}:`, err);
+    // 500 so Steadfast retries — the database may just be busy.
     return new NextResponse("Internal Server Error", { status: 500 });
   }
 
