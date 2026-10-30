@@ -119,10 +119,22 @@ export async function POST(req: NextRequest) {
           cancelledBy: "Steadfast Courier",
           notes: event.tracking_message || "Cancelled via Steadfast webhook",
         };
+      } else if (status === "pending" || status === "in_transit") {
+        newStatus = "in_transit";
+        activityLabel = "Marked In Transit (Steadfast Webhook)";
+        if (!order.courier.dispatchDate) {
+          order.courier.dispatchDate = (event.updated_at || now).slice(0, 10);
+        }
       }
 
       if (newStatus && order.status !== newStatus) {
-        order.status = newStatus;
+        // Safety: Don't move an order back to "in_transit" if it's already in a final state.
+        const isFinal = ["delivered", "partial_delivered", "refuse_return", "cancelled"].includes(order.status);
+        if (newStatus === "in_transit" && isFinal) {
+          // Keep the final status
+        } else {
+          order.status = newStatus;
+        }
       }
 
       order.activity = [
