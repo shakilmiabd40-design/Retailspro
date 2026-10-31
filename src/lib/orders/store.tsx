@@ -249,14 +249,19 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   function markProcessing(id: string, courierInfo?: Partial<CourierInfo>) {
     const order = getOrder(id);
     if (!order || order.status !== "pending") return;
+    // When a consignment has been created, advance straight through to In Transit
+    // (the parcel is with the courier) rather than stopping at Processing.
+    const hasTracking = !!courierInfo?.trackingId;
     updateOrder(id, (o) => ({
       ...o,
-      status: "processing",
-      courier: courierInfo ? { ...o.courier, ...courierInfo } : o.courier,
+      status: hasTracking ? "in_transit" : "processing",
+      courier: courierInfo
+        ? { ...o.courier, ...courierInfo, ...(hasTracking && !o.courier.dispatchDate ? { dispatchDate: new Date().toISOString().slice(0, 10) } : {}) }
+        : o.courier,
       activity: [
         ...o.activity,
         activity(
-          "Marked Processing",
+          hasTracking ? "Marked In Transit" : "Marked Processing",
           courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined
         ),
       ],
