@@ -32,7 +32,7 @@ const PAGE_SIZES = [20, 50, 100] as const;
 const ALL_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "delivered", "partial_delivered", "refuse_return", "cancelled"];
 
 function OrdersPageInner() {
-  const { orders, deleteOrder, dispatchOrder, markProcessing } = useOrders();
+  const { orders, deleteOrder, dispatchOrder, recordSteadfastBooking } = useOrders();
   const { getRow, recordPayout } = useSettlements();
   const { settings } = useSettings();
   const showToast = useToast();
@@ -74,6 +74,7 @@ function OrdersPageInner() {
 
   const steadfastEnabled = settings.courier.steadfast?.enabled ?? false;
   const activeCouriers = settings.courier.couriers.filter((c) => c.status === "active");
+  const steadfastDisplayName = activeCouriers.find((c) => c.id === "cr-steadfast" || c.name.trim().toLowerCase() === "steadfast")?.name || "Steadfast";
   // Same matching rule as the dispatch modal: the built-in Steadfast courier, even if its name was edited.
   const isSteadfastName = (name: string) => {
     const n = name.trim().toLowerCase();
@@ -228,19 +229,7 @@ function OrdersPageInner() {
           tracking = String(res.consignmentId);
         }
 
-        if (o.status === "pending") {
-          markProcessing(o.id, {
-            company: companyName || "Steadfast",
-            trackingId: tracking,
-          });
-        } else {
-          dispatchOrder(o.id, {
-            company: companyName || "Steadfast",
-            trackingId: tracking,
-            dispatchDate: new Date().toISOString().slice(0, 10),
-            forwardCost: o.courier.forwardCost || o.deliveryCharge || 0,
-          });
-        }
+        recordSteadfastBooking(o.id, tracking, companyName || steadfastDisplayName);
         sent++;
       } catch (err) {
         problems.push(`#${o.orderNumber}: ${err instanceof Error ? err.message : "couldn't create the consignment"}`);
@@ -252,7 +241,7 @@ function OrdersPageInner() {
     setConfirmBulk(false);
     // Drop the successful ones from the selection; anything unresolved stays ticked for one-click retry.
     setSelected(new Set(unresolved));
-    if (sent) showToast(`${sent} parcel${sent === 1 ? "" : "s"} sent to Steadfast and moved forward`, "success");
+    if (sent) showToast(`${sent} parcel${sent === 1 ? "" : "s"} sent to Steadfast; waiting for courier acceptance`, "success");
     if (problems.length) showToast(problems.length === 1 ? problems[0] : `${problems.length} orders weren't sent — ${problems[0]}`, "error");
   }
 

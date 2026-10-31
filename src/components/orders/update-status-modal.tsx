@@ -41,7 +41,7 @@ export function UpdateStatusModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const { markProcessing, dispatchOrder, markDelivered, markPartialDelivered, markRefuseReturn } = useOrders();
+  const { markProcessing, dispatchOrder, recordSteadfastBooking, markDelivered, markPartialDelivered, markRefuseReturn } = useOrders();
   const showToast = useToast();
 
   const { settings } = useSettings();
@@ -151,8 +151,13 @@ export function UpdateStatusModal({
       setSending(false);
     }
 
-    dispatchOrder(order.id, { company: trimmedCompany, trackingId: tracking, dispatchDate, forwardCost });
-    showToast(`Order #${order.orderNumber} marked In Transit`);
+    if (steadfastEnabled && isSteadfastCompany(trimmedCompany) && tracking) {
+      recordSteadfastBooking(order.id, tracking, trimmedCompany);
+      showToast(`Steadfast consignment linked to order #${order.orderNumber}; waiting for courier acceptance`);
+    } else {
+      dispatchOrder(order.id, { company: trimmedCompany, trackingId: tracking, dispatchDate, forwardCost });
+      showToast(`Order #${order.orderNumber} marked In Transit`);
+    }
     onClose();
   }
 

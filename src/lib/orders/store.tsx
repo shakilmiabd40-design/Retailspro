@@ -118,6 +118,8 @@ interface OrdersContextValue {
   statusCounts: Record<OrderStatus | "all", number>;
   createOrder: (input: NewOrderInput) => { ok: true; order: Order } | { ok: false; error: string };
   markProcessing: (id: string, courierInfo?: Partial<CourierInfo>) => void;
+  /** Saves a Steadfast booking without treating it as in transit until Steadfast reports `pending`. */
+  recordSteadfastBooking: (id: string, trackingId: string, company?: string) => void;
   dispatchOrder: (id: string, input: DispatchInput) => void;
   markDelivered: (id: string, input: DeliveredInput) => void;
   markPartialDelivered: (id: string, input: PartialInput) => void;
@@ -283,6 +285,22 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       activity: [
         ...o.activity,
         activity("Marked Processing", courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined),
+      ],
+    }));
+  }
+
+  function recordSteadfastBooking(id: string, trackingId: string, companyName?: string) {
+    const order = getOrder(id);
+    if (!order || (order.status !== "pending" && order.status !== "processing")) return;
+    const company = companyName || order.courier.company || "Steadfast";
+    updateOrder(id, (o) => ({
+      ...o,
+      status: "processing",
+      courier: { ...o.courier, company, trackingId },
+      activity: [
+        ...o.activity,
+        ...(o.status === "pending" ? [activity("Marked Processing", `Steadfast Consignment ID: ${trackingId}`)] : []),
+        ...(o.status === "processing" ? [activity("Steadfast consignment created", `Consignment ID: ${trackingId}; waiting for courier acceptance`)] : []),
       ],
     }));
   }
@@ -639,6 +657,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       statusCounts,
       createOrder,
       markProcessing,
+      recordSteadfastBooking,
       dispatchOrder,
       markDelivered,
       markPartialDelivered,

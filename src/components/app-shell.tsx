@@ -11,6 +11,7 @@ import { useSettings } from "@/lib/settings/store";
 import { useAccess } from "@/lib/settings/access";
 import { moduleLabel, requiredPermission } from "@/lib/settings/permissions";
 import { ACTION_LABELS } from "@/lib/settings/permissions";
+import { SteadfastAutoSync } from "@/components/orders/steadfast-auto-sync";
 
 function MaintenanceScreen() {
   const { settings } = useSettings();
@@ -68,6 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
+      <SteadfastAutoSync />
       <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuClick={() => setNavOpen(true)} />

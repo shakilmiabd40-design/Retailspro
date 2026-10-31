@@ -129,6 +129,11 @@ export interface SteadfastConsignment {
   [k: string]: unknown;
 }
 
+function reportedStatus(raw: Record<string, unknown>, consignment: Record<string, unknown>): string {
+  const value = consignment.delivery_status ?? consignment.status ?? raw.delivery_status ?? (typeof raw.status === "string" ? raw.status : undefined);
+  return typeof value === "string" || typeof value === "number" ? String(value) : "Unknown";
+}
+
 /** Fetches a consignment's current state from Steadfast (GET /status_by_cid/{id}). */
 export async function getSteadfastConsignment(consignmentId: number | string): Promise<CallResult<SteadfastConsignment>> {
   const res = await call<Record<string, unknown>>(`/status_by_cid/${encodeURIComponent(String(consignmentId))}`);
@@ -147,7 +152,9 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
       ...raw,
       // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
       // actually collected on a partial delivery.
-      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
+      // Status lookup responses commonly use { status: 200, delivery_status: "pending" }.
+      // Prefer the courier status field so the HTTP code is never mistaken for parcel status.
+      status: reportedStatus(raw, consignmentObj),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
       ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
     },
@@ -175,7 +182,7 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
       ...raw,
       // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
       // actually collected on a partial delivery.
-      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
+      status: reportedStatus(raw, consignmentObj),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
       ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
     },
