@@ -282,8 +282,14 @@ with 401 and Steadfast never retries a 4xx.
   sends) or an `X-Signature` HMAC of the raw body, so older and newer accounts both work.
 - Status mapping (`src/server/courier/steadfast-status.ts`): `pending` → In Transit,
   `delivered` → Delivered, `partial_delivered*` → Partial Delivered, `cancelled*` →
-  Cancelled. `in_review`, `hold`, `unknown` and the unconfirmed `*_approval_pending`
+  Refuse Return (a courier cancellation means the parcel is coming back; RetailsPro's
+  Cancelled status is only for orders cancelled before they reached the courier).
+  `in_review`, `hold`, `unknown` and the unconfirmed `*_approval_pending`
   stages leave the order in Processing on purpose.
+- A `cod_amount` on any Steadfast event is treated as what the customer actually paid.
+  Steadfast revises it when a partial-delivery customer pays less, so a later
+  amount-change webhook updates the order's **Customer Paid** figure even though the
+  status stays Partial Delivered.
 - If an order looks stale, open it and press **Sync status from Steadfast** — this pulls
   `status_by_cid` on demand and applies the same mapping, so a missed webhook can be
   repaired without touching the database. `POST /api/courier/steadfast/sync` with

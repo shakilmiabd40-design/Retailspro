@@ -32,8 +32,10 @@ export function mapSteadfastStatus(raw: unknown): OrderStatus | null {
   if (s === "delivered") return "delivered";
   // Covers partial_delivered and the partial_delivered_return_* follow-ups.
   if (s.startsWith("partial_delivered")) return "partial_delivered";
+  // A courier cancellation means the parcel is coming back, so it is a Refuse Return in
+  // RetailsPro. `cancelled` is reserved for orders cancelled before they reached the courier.
   // Covers cancelled and cancelled_return_*.
-  if (s.startsWith("cancelled")) return "cancelled";
+  if (s.startsWith("cancelled")) return "refuse_return";
   return null;
 }
 
@@ -48,6 +50,34 @@ export function toAmount(raw: unknown): number | null {
     if (!trimmed) return null;
     const n = Number(trimmed);
     return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The amount the customer actually paid. Steadfast's webhook calls it `cod_amount`, but older
+ * accounts and the status lookup use other names, so read them all in one place. Fields that
+ * explicitly mean "collected" win over the original `cod_amount` when both are present. A missing
+ * value stays `null` (unknown) and never overwrites what the order already has.
+ */
+export function readPaidAmount(source: Record<string, unknown> | null | undefined): number | null {
+  if (!source) return null;
+  const keys = [
+    "collected_amount",
+    "collectedAmount",
+    "paid_amount",
+    "paidAmount",
+    "customer_paid",
+    "customerPaid",
+    "received_amount",
+    "receivedAmount",
+    "cod_amount",
+    "codAmount",
+    "amount",
+  ];
+  for (const key of keys) {
+    const value = toAmount(source[key]);
+    if (value !== null) return value;
   }
   return null;
 }

@@ -71,13 +71,25 @@ export async function POST(req: NextRequest) {
 
   // Older Steadfast accounts push the status without a notification_type at all.
   const type = typeof event.notification_type === "string" ? event.notification_type.trim().toLowerCase() : "delivery_status";
-  if (type !== "delivery_status" && type !== "tracking_update") {
+  // `consignment_update` is sent when the parcel's details (e.g. its COD amount) change, often
+  // without a new status. It has to be applied too, otherwise a partial-delivery amount revision
+  // never reaches the order's Customer Paid figure.
+  if (type !== "delivery_status" && type !== "tracking_update" && type !== "consignment_update") {
     console.log(`[steadfast] ignoring notification_type=${type}`);
     return NextResponse.json({ status: "received" });
   }
 
-  const invoice = typeof event.invoice === "string" ? event.invoice.trim() : "";
-  const consignmentId = event.consignment_id === undefined || event.consignment_id === null ? "" : String(event.consignment_id).trim();
+  const text = (value: unknown) => (value === undefined || value === null ? "" : String(value).trim());
+  const consignment =
+    event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment)
+      ? (event.consignment as Record<string, unknown>)
+      : null;
+  const invoice = text(event.invoice) || text(consignment?.invoice);
+  const consignmentId =
+    text(event.consignment_id) ||
+    text(consignment?.consignment_id) ||
+    text(consignment?.consignmentId) ||
+    text(consignment?.id);
   if (!invoice && !consignmentId) {
     console.error("[steadfast] webhook had neither invoice nor consignment_id:", rawBody.slice(0, 500));
     return NextResponse.json({ status: "received" });

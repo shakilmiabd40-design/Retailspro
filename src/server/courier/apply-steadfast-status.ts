@@ -5,7 +5,7 @@ import { bumpRev } from "@/server/seed";
 import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
 import { FINAL_STATUSES } from "@/lib/orders/utils";
 import type { Order } from "@/lib/orders/types";
-import { mapSteadfastStatus, normalizeSteadfastStatus, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readPaidAmount, toAmount } from "./steadfast-status";
 
 /** The fields Steadfast puts on a `delivery_status` / `tracking_update` webhook (or a status lookup). */
 export interface SteadfastStatusPayload {
@@ -14,6 +14,9 @@ export interface SteadfastStatusPayload {
   cod_amount?: unknown;
   tracking_message?: unknown;
   updated_at?: unknown;
+  /** Some responses wrap the parcel fields in a `consignment` object. */
+  consignment?: unknown;
+  [key: string]: unknown;
 }
 
 export interface ApplyResult {
@@ -68,7 +71,7 @@ const LABELS: Record<string, string> = {
   in_transit: "Marked In Transit (Steadfast)",
   delivered: "Marked Delivered (Steadfast)",
   partial_delivered: "Marked Partial Delivered (Steadfast)",
-  cancelled: "Cancelled (Steadfast)",
+  refuse_return: "Marked Refuse Return (Steadfast)",
   none: "Steadfast status update",
 };
 
@@ -87,12 +90,20 @@ export async function applyStatusToOrder(
   const order: Order = row.data;
   const now = new Date().toISOString();
 
-  const rawStatus = normalizeSteadfastStatus(event.status);
+  // Some payloads (e.g. `consignment_update`) wrap the parcel fields in a `consignment` object.
+  const consignment = event.consignment && typeof event.consignment === "object" ? (event.consignment as Record<string, unknown>) : null;
+  const field = (key: string) => event[key] ?? consignment?.[key];
+
+  const rawStatus = normalizeSteadfastStatus(field("status"));
   const mapped = mapSteadfastStatus(rawStatus);
-  const charge = toAmount(event.delivery_charge);
-  const cod = toAmount(event.cod_amount);
-  const message = typeof event.tracking_message === "string" ? event.tracking_message.trim() : "";
-  const happenedAt = typeof event.updated_at === "string" && event.updated_at.trim() ? event.updated_at.trim() : now;
+  const charge = toAmount(field("delivery_charge"));
+  // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
+  // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
+  // same already-final status, or carry no status at all.
+  const cod = readPaidAmount(event) ?? readPaidAmount(consignment);
+  const message = typeof field("tracking_message") === "string" ? String(field("tracking_message")).trim() : "";
+  const rawHappenedAt = field("updated_at");
+  const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
 
   // The courier's confirmed forward charge is only known once it has the parcel.
   if (charge !== null) order.courier = { ...order.courier, forwardCost: charge };
@@ -112,27 +123,31 @@ export async function applyStatusToOrder(
           order.status = "in_transit";
         }
       }
-    } else if (mapped === "delivered" || mapped === "partial_delivered" || mapped === "cancelled") {
+    } else if (mapped === "delivered" || mapped === "partial_delivered" || mapped === "refuse_return") {
       order.status = mapped;
     }
   }
 
-  if (mapped === "delivered") {
-    order.delivery = {
-      ...order.delivery,
-      customerPaid: cod ?? order.delivery.customerPaid,
-      deliveryDate: happenedAt,
-    };
-  } else if (mapped === "partial_delivered") {
-    order.delivery = { ...order.delivery, customerPaid: cod ?? order.delivery.customerPaid };
+  if (mapped === "refuse_return") {
+    // A courier cancellation means the parcel never reached the customer and is coming back —
+    // that is a refused return in RetailsPro, not a pre-shipment Cancelled order.
+    order.delivery = { ...order.delivery, customerPaid: 0 };
     order.returnInfo = { ...order.returnInfo, returnRequired: true };
-  } else if (mapped === "cancelled") {
-    order.cancellation = {
-      ...order.cancellation,
-      cancelledAt: happenedAt,
-      cancelledBy: order.cancellation.cancelledBy || "Steadfast Courier",
-      notes: message || order.cancellation.notes || "Cancelled at Steadfast",
-    };
+  } else {
+    const hasDeliveryOutcome = order.status === "delivered" || order.status === "partial_delivered";
+    // Apply a (reported) paid amount whenever the order has a delivery outcome — including when
+    // this event only revised the amount and the status did not change.
+    if (cod !== null && hasDeliveryOutcome) {
+      order.delivery = { ...order.delivery, customerPaid: cod };
+    }
+    if (mapped === "delivered") {
+      // Don't move the delivery date forward when a later amount-change webhook repeats the status.
+      const deliveryDate = prev.status === "delivered" ? order.delivery.deliveryDate ?? happenedAt : happenedAt;
+      order.delivery = { ...order.delivery, deliveryDate };
+    }
+    if (mapped === "partial_delivered") {
+      order.returnInfo = { ...order.returnInfo, returnRequired: true };
+    }
   }
 
   const label = mapped ? LABELS[mapped] : LABELS.none;
@@ -144,6 +159,7 @@ export async function applyStatusToOrder(
     prev.status === order.status &&
     JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
     JSON.stringify(prev.delivery) === JSON.stringify(order.delivery) &&
+    JSON.stringify(prev.returnInfo) === JSON.stringify(order.returnInfo) &&
     last?.label === label &&
     last?.detail === detail;
 

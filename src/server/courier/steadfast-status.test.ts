@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readPaidAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -26,8 +26,11 @@ test("confirmed outcomes map to their RetailPro status", () => {
   assert.equal(mapSteadfastStatus("delivered"), "delivered");
   assert.equal(mapSteadfastStatus("partial_delivered"), "partial_delivered");
   assert.equal(mapSteadfastStatus("partial_delivered_return_processing"), "partial_delivered");
-  assert.equal(mapSteadfastStatus("cancelled"), "cancelled");
-  assert.equal(mapSteadfastStatus("cancelled_return_received"), "cancelled");
+});
+
+test("a courier cancellation is a Refuse Return (the parcel is coming back), not a Cancelled order", () => {
+  assert.equal(mapSteadfastStatus("cancelled"), "refuse_return");
+  assert.equal(mapSteadfastStatus("cancelled_return_received"), "refuse_return");
 });
 
 test("amounts may arrive as numbers or numeric strings, and missing stays null (not 0)", () => {
@@ -37,4 +40,17 @@ test("amounts may arrive as numbers or numeric strings, and missing stays null (
   assert.equal(toAmount(undefined), null);
   assert.equal(toAmount("abc"), null);
   assert.equal(toAmount(Number.NaN), null);
+});
+
+test("the paid amount is read from any of the field names Steadfast uses", () => {
+  assert.equal(readPaidAmount({ cod_amount: "450.00" }), 450);
+  assert.equal(readPaidAmount({ codAmount: 450 }), 450);
+  assert.equal(readPaidAmount({ collected_amount: 320 }), 320);
+  assert.equal(readPaidAmount({ paid_amount: "80" }), 80);
+  assert.equal(readPaidAmount({ customerPaid: 0 }), 0);
+  // An explicitly collected/paid field is what the customer handed over, so it wins over the
+  // original (higher) COD amount Steadfast may still include in the same payload.
+  assert.equal(readPaidAmount({ cod_amount: 1200, collected_amount: 450 }), 450);
+  assert.equal(readPaidAmount({}), null);
+  assert.equal(readPaidAmount(null), null);
 });

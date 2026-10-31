@@ -1,5 +1,6 @@
 import "server-only";
 import { query } from "../db";
+import { readPaidAmount } from "./steadfast-status";
 
 /**
  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
@@ -137,33 +138,18 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
   const raw = res.data as Record<string, unknown>;
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
 
-  const cod =
-    consignmentObj.cod_amount ??
-    consignmentObj.codAmount ??
-    consignmentObj.collected_amount ??
-    consignmentObj.collectedAmount ??
-    consignmentObj.paid_amount ??
-    consignmentObj.paidAmount ??
-    consignmentObj.amount ??
-    consignmentObj.received_amount ??
-    raw.cod_amount ??
-    raw.codAmount ??
-    raw.collected_amount ??
-    raw.collectedAmount ??
-    raw.paid_amount ??
-    raw.paidAmount ??
-    raw.amount ??
-    raw.received_amount;
+  const cod = readPaidAmount(consignmentObj) ?? readPaidAmount(raw);
 
   return {
     ok: true,
     data: {
-      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
-      cod_amount: cod !== undefined && cod !== null && cod !== "" ? Number(cod) || 0 : undefined,
-      ...(cod !== undefined && cod !== null && cod !== "" ? { codAmount: Number(cod) || 0, collected_amount: Number(cod) || 0, paid_amount: Number(cod) || 0 } : {}),
       ...consignmentObj,
       ...raw,
+      // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
+      // actually collected on a partial delivery.
+      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
+      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
     },
   };
 }
@@ -181,32 +167,17 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
   if (!res.ok) return res;
   const raw = res.data as Record<string, unknown>;
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
-  const cod =
-    consignmentObj.cod_amount ??
-    consignmentObj.codAmount ??
-    consignmentObj.collected_amount ??
-    consignmentObj.collectedAmount ??
-    consignmentObj.paid_amount ??
-    consignmentObj.paidAmount ??
-    consignmentObj.amount ??
-    consignmentObj.received_amount ??
-    raw.cod_amount ??
-    raw.codAmount ??
-    raw.collected_amount ??
-    raw.collectedAmount ??
-    raw.paid_amount ??
-    raw.paidAmount ??
-    raw.amount ??
-    raw.received_amount;
+  const cod = readPaidAmount(consignmentObj) ?? readPaidAmount(raw);
   return {
     ok: true,
     data: {
-      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
-      cod_amount: cod !== undefined && cod !== null && cod !== "" ? Number(cod) || 0 : undefined,
-      ...(cod !== undefined && cod !== null && cod !== "" ? { codAmount: Number(cod) || 0, collected_amount: Number(cod) || 0, paid_amount: Number(cod) || 0 } : {}),
       ...consignmentObj,
       ...raw,
+      // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
+      // actually collected on a partial delivery.
+      status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
+      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
     },
   };
 }
