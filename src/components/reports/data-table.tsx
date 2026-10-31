@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Download } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Download, Search, X } from "lucide-react";
 import { downloadCsv, downloadXlsx, type CellValue, type ExportColumn } from "@/lib/reports/export";
 import { useToast } from "@/components/toast";
 
@@ -62,17 +62,24 @@ export function DataTable<T>({ exportName, title, columns, rows, rowKey, pageSiz
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(columns.filter((c) => c.hidden).map((c) => c.key)));
   const [colsOpen, setColsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const colsRef = useOutsideClose(colsOpen, () => setColsOpen(false));
   const exportRef = useOutsideClose(exportOpen, () => setExportOpen(false));
 
   const visible = useMemo(() => columns.filter((c) => !hidden.has(c.key)), [columns, hidden]);
 
+  const filtered = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    if (!query) return rows;
+    return rows.filter((row) => columns.some((column) => String(column.value(row) ?? "").toLocaleLowerCase().includes(query)));
+  }, [rows, columns, search]);
+
   const sorted = useMemo(() => {
-    if (!sort) return rows;
+    if (!sort) return filtered;
     const col = columns.find((c) => c.key === sort.key);
-    if (!col) return rows;
-    return [...rows].sort((a, b) => compare(col.value(a), col.value(b)) * sort.dir);
-  }, [rows, sort, columns]);
+    if (!col) return filtered;
+    return [...filtered].sort((a, b) => compare(col.value(a), col.value(b)) * sort.dir);
+  }, [filtered, sort, columns]);
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -105,10 +112,25 @@ export function DataTable<T>({ exportName, title, columns, rows, rowKey, pageSiz
             </p>
           )}
           <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>
-            {rows.length} row{rows.length === 1 ? "" : "s"}
+            {sorted.length}{search.trim() ? ` of ${rows.length}` : ""} row{sorted.length === 1 ? "" : "s"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <label className="focus-within:ring-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+            <Search size={13} aria-hidden="true" />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(0);
+              }}
+              placeholder="Search rows"
+              aria-label={`Search ${title || exportName} rows`}
+              className="w-36 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-faint)]"
+            />
+            {search && <button type="button" onClick={() => { setSearch(""); setPage(0); }} aria-label="Clear search" className="focus-ring rounded"><X size={13} /></button>}
+          </label>
           {toolbar}
           <div ref={colsRef} className="relative">
             <button onClick={() => setColsOpen((v) => !v)} className="focus-ring flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
