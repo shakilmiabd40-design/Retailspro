@@ -4,6 +4,7 @@ import { ApiError, json, readJson, route, str } from "@/server/http";
 import { requireAuth } from "@/server/auth";
 import { createSteadfastShipment, getSteadfastConsignment, pingSteadfast, steadfastConfigured } from "@/server/courier/steadfast";
 import type { Order } from "@/lib/orders/types";
+import { normalizePhoneForCourier } from "@/lib/utils/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,7 @@ export const POST = route(async (req) => {
     const result = await createSteadfastShipment({
       invoice,
       recipient_name: str(b.recipientName, 200),
-      recipient_phone: phone,
+      recipient_phone: normalizePhoneForCourier(phone) || phone,
       recipient_address: str(b.address, 1000),
       cod_amount: Math.max(0, Number(b.codAmount) || 0),
       package_description: str(b.description, 500),

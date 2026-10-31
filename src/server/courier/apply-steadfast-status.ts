@@ -103,8 +103,23 @@ export async function applyStatusToOrder(
   }
 
   // Never walk a finished order backwards (e.g. a late "pending" event after delivery).
-  const canMove = mapped !== null && !(mapped === "in_transit" && FINAL_STATUSES.includes(order.status));
-  if (canMove) order.status = mapped;
+  if (mapped && !FINAL_STATUSES.includes(order.status)) {
+    // Steadfast in_review/pending means approved/with courier - move to in_transit only in specific cases
+    if (mapped === "in_transit") {
+      if (order.status === "processing") {
+        order.status = "in_transit";
+      } else if (order.status === "pending") {
+        // Only auto-move from pending if it came as in_review->pending or has existing tracking/consignment
+        if (rawStatus === "in_review" || rawStatus === "in_transit" || (order.courier.trackingId && /^\d+$/.test(String(order.courier.trackingId).trim()))) {
+          order.status = "in_transit";
+        }
+        // Otherwise don't move pending -> in_transit
+      }
+      // if already in_transit, keep it
+    } else if (mapped === "delivered" || mapped === "partial_delivered" || mapped === "cancelled") {
+      order.status = mapped;
+    }
+  }
 
   if (mapped === "delivered") {
     order.delivery = {

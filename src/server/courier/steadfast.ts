@@ -86,10 +86,16 @@ export type SteadfastShipmentResult =
   | { ok: true; consignmentId: number; trackingCode: string }
   | { ok: false; error: string };
 
+import { normalizePhoneForCourier } from "@/lib/utils/phone";
+
 export async function createSteadfastShipment(input: SteadfastShipmentInput): Promise<SteadfastShipmentResult> {
+  const normalized = {
+    ...input,
+    recipient_phone: normalizePhoneForCourier(input.recipient_phone) || input.recipient_phone,
+  };
   const r = await call<Record<string, unknown>>("/create_order", {
     method: "POST",
-    body: JSON.stringify({ ...input }),
+    body: JSON.stringify(normalized),
   });
   if (!r.ok) return r;
   const d = r.data as {

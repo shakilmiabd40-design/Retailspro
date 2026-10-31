@@ -235,6 +235,33 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     };
 
+    // Normalize phone to English digits without dashes/spaces before saving
+    try {
+      const normalizePhone = (p: string) => {
+        if (!p) return p;
+        let s = String(p).trim();
+        const banglaDigits: Record<string, string> = {
+          "০": "0",
+          "১": "1",
+          "২": "2",
+          "৩": "3",
+          "৪": "4",
+          "৫": "5",
+          "৬": "6",
+          "৭": "7",
+          "৮": "8",
+          "৯": "9",
+        };
+        for (const [bn, en] of Object.entries(banglaDigits)) {
+          s = s.split(bn).join(en);
+        }
+        s = s.replace(/[-\s()\+\.\u2010-\u2015]/g, "");
+        return s;
+      };
+      order.phone = normalizePhone(order.phone);
+      if (order.altPhone) order.altPhone = normalizePhone(order.altPhone);
+    } catch {}
+
     reserveStock(itemsAsLineItems(order.items));
     setOrders((prev) => [order, ...prev]);
     return { ok: true, order };
@@ -249,19 +276,21 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   function markProcessing(id: string, courierInfo?: Partial<CourierInfo>) {
     const order = getOrder(id);
     if (!order || order.status !== "pending") return;
-    // When a consignment has been created, advance straight through to In Transit
-    // (the parcel is with the courier) rather than stopping at Processing.
+    // Only auto-advance to In Transit if we explicitly have a consignment/tracking
+    // AND we came via the Steadfast creation path (tracking id provided). Do NOT
+    // auto-advance on manual "Mark as Processing" - let staff explicitly dispatch.
     const hasTracking = !!courierInfo?.trackingId;
+    const createdConsignment = hasTracking;
     updateOrder(id, (o) => ({
       ...o,
-      status: hasTracking ? "in_transit" : "processing",
+      status: createdConsignment ? "in_transit" : "processing",
       courier: courierInfo
-        ? { ...o.courier, ...courierInfo, ...(hasTracking && !o.courier.dispatchDate ? { dispatchDate: new Date().toISOString().slice(0, 10) } : {}) }
+        ? { ...o.courier, ...courierInfo, ...(createdConsignment && !o.courier.dispatchDate ? { dispatchDate: new Date().toISOString().slice(0, 10) } : {}) }
         : o.courier,
       activity: [
         ...o.activity,
         activity(
-          hasTracking ? "Marked In Transit" : "Marked Processing",
+          createdConsignment ? "Marked In Transit" : "Marked Processing",
           courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined
         ),
       ],
