@@ -128,15 +128,36 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
   if (!res.ok) return res;
 
   // Steadfast status_by_cid response structure can be flat or nested under "consignment"
-  const raw = res.data;
-  const consignmentObj = (raw.consignment as Record<string, unknown>) || raw;
+  const raw = res.data as Record<string, unknown>;
+  const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+
+  const cod =
+    consignmentObj.cod_amount ??
+    consignmentObj.codAmount ??
+    consignmentObj.collected_amount ??
+    consignmentObj.collectedAmount ??
+    consignmentObj.paid_amount ??
+    consignmentObj.paidAmount ??
+    consignmentObj.amount ??
+    consignmentObj.received_amount ??
+    raw.cod_amount ??
+    raw.codAmount ??
+    raw.collected_amount ??
+    raw.collectedAmount ??
+    raw.paid_amount ??
+    raw.paidAmount ??
+    raw.amount ??
+    raw.received_amount;
 
   return {
     ok: true,
     data: {
       status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      cod_amount: cod !== undefined && cod !== null && cod !== "" ? Number(cod) || 0 : undefined,
+      ...(cod !== undefined && cod !== null && cod !== "" ? { codAmount: Number(cod) || 0, collected_amount: Number(cod) || 0, paid_amount: Number(cod) || 0 } : {}),
       ...consignmentObj,
+      ...raw,
     },
   };
 }
@@ -152,14 +173,34 @@ export async function updateSteadfastStatus(consignmentId: number | string, stat
 export async function getSteadfastConsignmentByInvoice(invoice: string): Promise<CallResult<SteadfastConsignment>> {
   const res = await call<Record<string, unknown>>(`/status_by_invoice/${encodeURIComponent(invoice)}`);
   if (!res.ok) return res;
-  const raw = res.data;
-  const consignmentObj = (raw.consignment as Record<string, unknown>) || raw;
+  const raw = res.data as Record<string, unknown>;
+  const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+  const cod =
+    consignmentObj.cod_amount ??
+    consignmentObj.codAmount ??
+    consignmentObj.collected_amount ??
+    consignmentObj.collectedAmount ??
+    consignmentObj.paid_amount ??
+    consignmentObj.paidAmount ??
+    consignmentObj.amount ??
+    consignmentObj.received_amount ??
+    raw.cod_amount ??
+    raw.codAmount ??
+    raw.collected_amount ??
+    raw.collectedAmount ??
+    raw.paid_amount ??
+    raw.paidAmount ??
+    raw.amount ??
+    raw.received_amount;
   return {
     ok: true,
     data: {
       status: String(consignmentObj.status ?? raw.status ?? "Unknown"),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      cod_amount: cod !== undefined && cod !== null && cod !== "" ? Number(cod) || 0 : undefined,
+      ...(cod !== undefined && cod !== null && cod !== "" ? { codAmount: Number(cod) || 0, collected_amount: Number(cod) || 0, paid_amount: Number(cod) || 0 } : {}),
       ...consignmentObj,
+      ...raw,
     },
   };
 }

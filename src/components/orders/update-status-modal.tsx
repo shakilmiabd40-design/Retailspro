@@ -99,9 +99,15 @@ export function UpdateStatusModal({
     if (next === "delivered") {
       setCustomerPaid(expectedCod(order));
     } else if (next === "partial") {
-      // Default to the forward courier cost already on file — the operator
-      // adjusts it to whatever the customer actually paid before confirming.
-      setCustomerPaid(order.courier.forwardCost);
+      // For partial delivery, use the amount collected by courier if available
+      const collected = (order as any).delivery?.customerPaid ?? (order as any).delivery?.collectedAmount ?? (order as any).collectedAmount;
+      if (typeof collected === "number" && collected > 0) {
+        setCustomerPaid(collected);
+      } else if (typeof order.courier?.forwardCost === "number" && order.courier.forwardCost > 0) {
+        setCustomerPaid(order.courier.forwardCost);
+      } else {
+        setCustomerPaid(0);
+      }
     }
     // "refuse" doesn't use customerPaid — it's forced to 0 on confirm.
   }
@@ -188,9 +194,40 @@ export function UpdateStatusModal({
         // Log all possible charge fields to find the right one
         const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
         setForwardCharge(charge);
-        if (s.includes("partial")) setOutcome("partial");
-        else if (s.includes("deliver")) { setOutcome("delivered"); setCustomerPaid(expectedCod(order)); }
-        else if (s.includes("cancel") || s.includes("return")) setOutcome("refuse");
+        const collected = Number(
+          res.cod_amount ??
+            res.codAmount ??
+            res.collected_amount ??
+            res.collectedAmount ??
+            res.paid_amount ??
+            res.paidAmount ??
+            res.customer_paid ??
+            res.customerPaid ??
+            res.consignment?.cod_amount ??
+            res.consignment?.codAmount ??
+            res.consignment?.collected_amount ??
+            res.consignment?.collectedAmount ??
+            res.consignment?.paid_amount ??
+            res.consignment?.paidAmount ??
+            NaN
+        );
+        if (s.includes("partial")) {
+          setOutcome("partial");
+          if (Number.isFinite(collected) && collected >= 0) {
+            setCustomerPaid(collected);
+          } else if (Number.isFinite(charge) && charge >= 0) {
+            setCustomerPaid(charge);
+          }
+        } else if (s.includes("deliver")) {
+          setOutcome("delivered");
+          if (Number.isFinite(collected) && collected >= 0) {
+            setCustomerPaid(collected);
+          } else {
+            setCustomerPaid(expectedCod(order));
+          }
+        } else if (s.includes("cancel") || s.includes("return")) {
+          setOutcome("refuse");
+        }
       }
     } catch (err) {
       showToast(`Steadfast: ${err instanceof Error ? err.message : "status check failed"}`, "error");
