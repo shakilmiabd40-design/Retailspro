@@ -276,23 +276,13 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   function markProcessing(id: string, courierInfo?: Partial<CourierInfo>) {
     const order = getOrder(id);
     if (!order || order.status !== "pending") return;
-    // Only auto-advance to In Transit if we explicitly have a consignment/tracking
-    // AND we came via the Steadfast creation path (tracking id provided). Do NOT
-    // auto-advance on manual "Mark as Processing" - let staff explicitly dispatch.
-    const hasTracking = !!courierInfo?.trackingId;
-    const createdConsignment = hasTracking;
     updateOrder(id, (o) => ({
       ...o,
-      status: createdConsignment ? "in_transit" : "processing",
-      courier: courierInfo
-        ? { ...o.courier, ...courierInfo, ...(createdConsignment && !o.courier.dispatchDate ? { dispatchDate: new Date().toISOString().slice(0, 10) } : {}) }
-        : o.courier,
+      status: "processing",
+      courier: courierInfo ? { ...o.courier, ...courierInfo } : o.courier,
       activity: [
         ...o.activity,
-        activity(
-          createdConsignment ? "Marked In Transit" : "Marked Processing",
-          courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined
-        ),
+        activity("Marked Processing", courierInfo?.trackingId ? `Steadfast Consignment ID: ${courierInfo.trackingId}` : undefined),
       ],
     }));
   }

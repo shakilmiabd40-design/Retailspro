@@ -118,30 +118,7 @@ export function UpdateStatusModal({
     let tracking = order.courier?.trackingId || "";
     let companyName = order.courier?.company || "Steadfast";
 
-    // If Steadfast is enabled and no consignment is created yet, send to Steadfast API
-    if (steadfastEnabled && !tracking) {
-      setSending(true);
-      try {
-        const res = await api<{ consignmentId: number; trackingCode: string }>("POST", "/api/courier/steadfast", {
-          invoice: order.orderNumber,
-          recipientName: order.customerName,
-          phone: order.phone,
-          address: [order.address, order.area, order.district].filter(Boolean).join(", "),
-          codAmount: expectedCod(order),
-          description: order.items.map((i) => `${i.qty}x ${i.productName} (${[i.color, i.size].filter(Boolean).join("/")})`).join(", "),
-        });
-        tracking = String(res.consignmentId);
-        companyName = "Steadfast";
-        showToast(`Steadfast consignment created — tracking ${res.trackingCode || res.consignmentId}`, "success");
-      } catch (err) {
-        showToast(`Steadfast: ${err instanceof Error ? err.message : "couldn't create the consignment"}`, "error");
-        setSending(false);
-        return;
-      }
-      setSending(false);
-    }
-
-    markProcessing(order.id, tracking ? { company: companyName, trackingId: tracking } : undefined);
+    markProcessing(order.id, undefined);
     showToast(`Order #${order.orderNumber} moved to Processing`);
     onClose();
   }
@@ -324,7 +301,7 @@ export function UpdateStatusModal({
               className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-white disabled:opacity-50"
               style={{ background: "var(--brand)" }}
             >
-              {sending ? "Sending to Steadfast..." : (steadfastEnabled ? "Send to Steadfast & Mark Processing" : "Mark as Processing")}
+              Mark as Processing
             </button>
           </div>
         )}
