@@ -69,6 +69,8 @@ function OrdersPageInner() {
   const [settling, setSettling] = useState(false);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<{ done: number; total: number } | null>(null);
+  const [movingToTransit, setMovingToTransit] = useState(false);
+  const [confirmBulkMove, setConfirmBulkMove] = useState(false);
 
   const steadfastEnabled = settings.courier.steadfast?.enabled ?? false;
   const activeCouriers = settings.courier.couriers.filter((c) => c.status === "active");
@@ -80,7 +82,9 @@ function OrdersPageInner() {
 
   /** Pending or Processing orders can be handed to a courier. */
   const isDispatchable = (o: Order) => o.status === "pending" || o.status === "processing";
+  const isMovableToTransit = (o: Order) => o.status === "processing";
   const selectedOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isDispatchable(o)), [orders, selected]);
+  const selectedMovableToTransit = useMemo(() => orders.filter((o) => selected.has(o.id) && isMovableToTransit(o)), [orders, selected]);
 
   /** Delivered or Partial Delivered orders with pending settlement can be settled. Fully settled cannot be re-settled. */
   const isSettlable = (o: Order) => {
@@ -90,7 +94,7 @@ function OrdersPageInner() {
     return r.status !== "Settled" && r.pending > 0;
   };
 
-  const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o);
+  const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o) || isMovableToTransit(o);
   const selectedSettlableOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isSettlable(o)), [orders, selected]);
 
   const courierCompanies = useMemo(
@@ -255,6 +259,30 @@ function OrdersPageInner() {
   /**
    * Bulk settles all selected delivered/partial orders that still have pending settlement balance.
    */
+  async function handleBulkMoveToTransit() {
+    const targets = selectedMovableToTransit;
+    if (!targets.length || movingToTransit) return;
+    setMovingToTransit(true);
+    let moved = 0;
+    for (const o of targets) {
+      try {
+        dispatchOrder(o.id, {
+          company: o.courier.company || "",
+          trackingId: o.courier.trackingId || "",
+          dispatchDate: o.courier.dispatchDate || new Date().toISOString().slice(0, 10),
+          forwardCost: o.courier.forwardCost || o.deliveryCharge || 0,
+        });
+        moved++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setMovingToTransit(false);
+    setConfirmBulkMove(false);
+    setSelected(new Set());
+    if (moved) showToast(`${moved} order${moved === 1 ? "" : "s"} moved to In Transit`, "success");
+  }
+
   async function handleBulkSettlement() {
     const targets = selectedSettlableOrders;
     if (!targets.length || settling) return;
@@ -492,11 +520,27 @@ function OrdersPageInner() {
                 }, 0), 2)})
               </span>
             )}
+            {selectedMovableToTransit.length > 0 && (
+              <span className="ml-2 text-[12px]" style={{ color: "var(--blue)" }}>
+                Processing: {selectedMovableToTransit.length}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setSelected(new Set())} className="focus-ring rounded-xl border px-3 py-2 text-[12.5px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
               Clear
             </button>
+            {selectedMovableToTransit.length > 0 && (
+              <button
+                onClick={() => setConfirmBulkMove(true)}
+                disabled={movingToTransit}
+                className="focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+                style={{ background: "var(--blue)" }}
+              >
+                <Truck size={15} />
+                {movingToTransit ? "Moving..." : `Move to In Transit (${selectedMovableToTransit.length})`}
+              </button>
+            )}
             {selectedOrders.length > 0 && (
               <button
                 onClick={() => setConfirmBulk(true)}
@@ -700,6 +744,14 @@ function OrdersPageInner() {
 
       <CancelOrderModal order={cancelTarget} open={!!cancelTarget} onClose={() => setCancelTarget(null)} />
       <UpdateStatusModal order={statusTarget} open={!!statusTarget} onClose={() => setStatusTarget(null)} />
+      <ConfirmDialog
+        open={confirmBulkMove}
+        title="Move to In Transit"
+        message={`Move ${selectedMovableToTransit.length} selected processing order(s) to In Transit (dispatch them)?`}
+        confirmLabel="Move to In Transit"
+        onCancel={() => setConfirmBulkMove(false)}
+        onConfirm={handleBulkMoveToTransit}
+      />
       <ConfirmDialog
         open={confirmBulk}
         title="Send to Steadfast"
