@@ -91,9 +91,10 @@ export function getPool(): Pool {
       // Small on purpose: every server instance (each serverless function, each dev/prod process) keeps its own pool,
       // and hosted databases allow few connections in total (Aiven free = 20, some reserved for Aiven itself).
       // At 2 per instance roughly nine concurrent instances still fit; set DATABASE_POOL_MAX=1 on serverless.
-      max: Number(process.env.DATABASE_POOL_MAX ?? 2),
-      idleTimeoutMillis: 5_000,
-      connectionTimeoutMillis: 15_000,
+      max: Number(process.env.DATABASE_POOL_MAX ?? 1),
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 30_000,
+      maxUses: 7500,
     });
     globalThis.__inventoryProPool.on("error", (err) => console.error("[db] idle client error", err.message));
   }
