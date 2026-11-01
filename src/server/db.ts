@@ -101,16 +101,33 @@ export function getPool(): Pool {
 }
 
 export async function query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
-  return whileBusy(() => getPool().query<T>(text, params));
+  const start = Date.now();
+  try {
+    const res = await whileBusy(() => getPool().query<T>(text, params));
+    const dur = Date.now() - start;
+    if (dur > 200) {
+      console.warn(`[db][slow] ${dur}ms | ${text.replace(/\s+/g, " ").slice(0, 200)}`);
+    }
+    return res;
+  } catch (err) {
+    const dur = Date.now() - start;
+    console.error(`[db][err] ${dur}ms | ${text.replace(/\s+/g, " ").slice(0, 200)}`, err);
+    throw err;
+  }
 }
 
 /** Runs `fn` inside a transaction; commits on success, rolls back on any throw. */
 export async function tx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const start = Date.now();
   const client = await whileBusy(() => getPool().connect());
   try {
     await client.query("begin");
     const result = await fn(client);
     await client.query("commit");
+    const dur = Date.now() - start;
+    if (dur > 300) {
+      console.warn(`[db][tx][slow] ${dur}ms`);
+    }
     return result;
   } catch (err) {
     try {
@@ -118,6 +135,8 @@ export async function tx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> 
     } catch {
       /* connection already gone */
     }
+    const dur = Date.now() - start;
+    console.error(`[db][tx][err] ${dur}ms`, err);
     throw err;
   } finally {
     client.release();
