@@ -118,7 +118,6 @@ interface SessionRow {
   role_locked: boolean;
   role_permissions: PermissionMap;
   role_created_at: Date;
-  timeout_minutes: string | null;
 }
 
 export interface RequireOpts {
@@ -132,28 +131,47 @@ export interface RequireOpts {
 }
 
 /** Validates the session cookie and (optionally) the caller's permissions. Throws ApiError 401 / 403. */
+let _cachedSettings: { timeout: number; at: number } | null = null;
+const SETTINGS_TTL_MS = 60_000;
+
+async function getSessionTimeoutMinutes(): Promise<number> {
+  const now = Date.now();
+  if (_cachedSettings && now - _cachedSettings.at < SETTINGS_TTL_MS) {
+    return _cachedSettings.timeout;
+  }
+  try {
+    const { rows } = await query<{ timeout: string | null }>("select data->'security'->>'sessionTimeoutMinutes' as timeout from app_documents where key = 'settings'");
+    const timeout = Number(rows[0]?.timeout) > 0 ? Number(rows[0]?.timeout) : DEFAULT_SETTINGS.security.sessionTimeoutMinutes;
+    _cachedSettings = { timeout, at: now };
+    return timeout;
+  } catch {
+    return DEFAULT_SETTINGS.security.sessionTimeoutMinutes;
+  }
+}
+
 export async function requireAuth(req: NextRequest, opts: RequireOpts = {}): Promise<Auth> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (!token) throw new ApiError(401, "unauthenticated", "Please sign in.");
   const hash = sha256(token);
 
-  const { rows } = await query<SessionRow>(
-    `select s.token_hash, s.last_seen_at, s.expires_at,
-            u.id, u.name, u.email, u.phone, u.role_id, u.status, u.must_reset_password, u.last_login,
-            r.name as role_name, r.description as role_description, r.built_in as role_built_in, r.locked as role_locked,
-            r.permissions as role_permissions, r.created_at as role_created_at,
-            (select data->'security'->>'sessionTimeoutMinutes' from app_documents where key = 'settings') as timeout_minutes
-       from app_sessions s
-       join app_users u on u.id = s.user_id
-       join app_roles r on r.id = u.role_id
-      where s.token_hash = $1`,
-    [hash]
-  );
+  const [timeoutMin, { rows }] = await Promise.all([
+    getSessionTimeoutMinutes(),
+    query<SessionRow>(
+      `select s.token_hash, s.last_seen_at, s.expires_at,
+              u.id, u.name, u.email, u.phone, u.role_id, u.status, u.must_reset_password, u.last_login,
+              r.name as role_name, r.description as role_description, r.built_in as role_built_in, r.locked as role_locked,
+              r.permissions as role_permissions, r.created_at as role_created_at
+         from app_sessions s
+         join app_users u on u.id = s.user_id
+         join app_roles r on r.id = u.role_id
+        where s.token_hash = $1`,
+      [hash]
+    ),
+  ]);
   const row = rows[0];
   if (!row) throw new ApiError(401, "unauthenticated", "Your session has ended. Please sign in again.");
 
   const now = Date.now();
-  const timeoutMin = Number(row.timeout_minutes) > 0 ? Number(row.timeout_minutes) : DEFAULT_SETTINGS.security.sessionTimeoutMinutes;
   const idleExpired = now - row.last_seen_at.getTime() > timeoutMin * 60_000;
   if (row.expires_at.getTime() < now || idleExpired || row.status !== "active") {
     await query("delete from app_sessions where token_hash = $1", [hash]);
