@@ -19,16 +19,33 @@ export interface SteadfastCredentials {
 const DEFAULT_BASE_URL = "https://portal.packzy.com/api/v1";
 const TIMEOUT_MS = 10_000;
 
+let _cachedCreds: { creds: SteadfastCredentials | null; at: number } | null = null;
+const CREDS_TTL_MS = 60_000;
+
 export async function getSteadfastCredentials(): Promise<SteadfastCredentials | null> {
-  const { rows } = await query<{ cf: { apiKey?: string; apiSecret?: string; baseUrl?: string } | null }>(
-    "select data->'courier'->'steadfast' as cf from app_documents where key = 'settings'"
-  );
-  const cf = rows[0]?.cf;
-  const apiKey = (cf?.apiKey ?? "").trim() || process.env.STEADFAST_API_KEY?.trim() || "";
-  const apiSecret = (cf?.apiSecret ?? "").trim() || process.env.STEADFAST_API_SECRET?.trim() || "";
-  const baseUrl = ((cf?.baseUrl ?? "").trim() || process.env.STEADFAST_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  if (!apiKey || !apiSecret) return null;
-  return { apiKey, apiSecret, baseUrl };
+  const now = Date.now();
+  if (_cachedCreds && now - _cachedCreds.at < CREDS_TTL_MS) {
+    return _cachedCreds.creds;
+  }
+  try {
+    const { rows } = await query<{ cf: { apiKey?: string; apiSecret?: string; baseUrl?: string } | null }>(
+      "select data->'courier'->'steadfast' as cf from app_documents where key = 'settings'"
+    );
+    const cf = rows[0]?.cf;
+    const apiKey = (cf?.apiKey ?? "").trim() || process.env.STEADFAST_API_KEY?.trim() || "";
+    const apiSecret = (cf?.apiSecret ?? "").trim() || process.env.STEADFAST_API_SECRET?.trim() || "";
+    const baseUrl = ((cf?.baseUrl ?? "").trim() || process.env.STEADFAST_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    if (!apiKey || !apiSecret) {
+      _cachedCreds = { creds: null, at: now };
+      return null;
+    }
+    const creds = { apiKey, apiSecret, baseUrl };
+    _cachedCreds = { creds, at: now };
+    return creds;
+  } catch {
+    if (_cachedCreds) return _cachedCreds.creds;
+    return null;
+  }
 }
 
 export const steadfastConfigured = async () => (await getSteadfastCredentials()) !== null;
