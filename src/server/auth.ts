@@ -132,7 +132,7 @@ export interface RequireOpts {
 
 /** Validates the session cookie and (optionally) the caller's permissions. Throws ApiError 401 / 403. */
 let _cachedSettings: { timeout: number; at: number } | null = null;
-const SETTINGS_TTL_MS = 60_000;
+const SETTINGS_TTL_MS = 120_000;
 
 async function getSessionTimeoutMinutes(): Promise<number> {
   const now = Date.now();
@@ -145,6 +145,7 @@ async function getSessionTimeoutMinutes(): Promise<number> {
     _cachedSettings = { timeout, at: now };
     return timeout;
   } catch {
+    if (_cachedSettings) return _cachedSettings.timeout;
     return DEFAULT_SETTINGS.security.sessionTimeoutMinutes;
   }
 }
