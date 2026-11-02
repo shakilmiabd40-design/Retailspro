@@ -6,6 +6,7 @@ import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
 import { FINAL_STATUSES } from "@/lib/orders/utils";
 import type { Order } from "@/lib/orders/types";
 import { mapSteadfastStatus, normalizeSteadfastStatus, readPaidAmount, toAmount } from "./steadfast-status";
+import { COUNTER_START } from "@/server/collections";
 
 /** The fields Steadfast puts on a `delivery_status` / `tracking_update` webhook (or a status lookup). */
 export interface SteadfastStatusPayload {
@@ -175,6 +176,46 @@ export async function applyStatusToOrder(
     [order.id, JSON.stringify(order), updatedBy]
   );
   await bumpRev(client, "orders");
+
+  // Auto-create warranties when order becomes delivered
+  if (prev.status !== "delivered" && order.status === "delivered") {
+    try {
+      const { rows: docRows } = await client.query<{ data: any }>("select data from app_documents where key = 'settings' limit 1");
+      const settings = docRows[0]?.data || {};
+      const warrantyDays = Number(settings?.warranty?.durationDays) || 365;
+      const warrantyPrefix = settings?.invoice?.numbering?.warranty || "WAR-";
+      const end = new Date(Date.now() + warrantyDays * 24 * 60 * 60 * 1000).toISOString();
+      for (const item of order.items || []) {
+        const { rows: c } = await client.query("insert into app_counters (name, value) values ($1, $2::bigint + 1) on conflict (name) do update set value = app_counters.value + 1 returning value::text", ["warranty", COUNTER_START.warranty || 1001]);
+        const wnum = Number(c[0].value);
+        const w = {
+          id: crypto.randomUUID(),
+          warrantyNumber: `${warrantyPrefix}${wnum}`,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          source: "order",
+          customerName: order.customerName,
+          customerPhone: order.phone,
+          productId: item.productId,
+          productName: item.productName,
+          variantId: item.variantId,
+          color: item.color || "",
+          size: item.size || "",
+          sku: item.sku || "",
+          qty: item.qty,
+          startDate: now,
+          endDate: end,
+          status: "active",
+          claims: [],
+          createdAt: now,
+        };
+        await client.query("insert into app_records (collection, id, data, updated_by) values ($1,$2,$3::jsonb,$4)", ["warranties", w.id, JSON.stringify(w), updatedBy]);
+      }
+      await bumpRev(client, "warranties");
+    } catch (e) {
+      console.error("[steadfast] failed to auto-create warranties", e);
+    }
+  }
 
   const events = orderEvents(prev, order);
   const queuedEvents = events.length ? await enqueueEvents(client, events) : 0;
