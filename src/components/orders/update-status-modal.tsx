@@ -152,8 +152,17 @@ export function UpdateStatusModal({
     }
 
     if (steadfastEnabled && isSteadfastCompany(trimmedCompany) && tracking) {
+      let charge = forwardCost;
+      try {
+        const res = await api<any>("GET", `/api/courier/steadfast?id=${encodeURIComponent(tracking)}`);
+        const c = Number(res?.delivery_charge ?? res?.charge ?? res?.consignment?.delivery_charge ?? res?.consignment?.charge ?? NaN);
+        if (Number.isFinite(c) && c >= 0) charge = c;
+      } catch {}
       recordSteadfastBooking(order.id, tracking, trimmedCompany);
-      showToast(`Steadfast consignment linked to order #${order.orderNumber}; waiting for courier acceptance`);
+      if (charge > 0) {
+        dispatchOrder(order.id, { company: trimmedCompany, trackingId: tracking, dispatchDate, forwardCost: charge });
+      }
+      showToast(`Steadfast consignment linked to order #${order.orderNumber}; waiting for courier acceptance${charge > 0 ? ` (Delivery charge: ৳${charge})` : ""}`);
     } else {
       dispatchOrder(order.id, { company: trimmedCompany, trackingId: tracking, dispatchDate, forwardCost });
       showToast(`Order #${order.orderNumber} marked In Transit`);
