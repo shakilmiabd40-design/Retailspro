@@ -74,16 +74,16 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
     return entry;
   };
 
-  const receiptChanges = changes.purchase_orders ?? new Map();
+  const receiptChanges: Map<string, Change<PurchaseOrder>> = changes.purchase_orders ?? new Map<string, Change<PurchaseOrder>>();
   for (const [poId, change] of receiptChanges) {
     if (!change.after) continue;
     const po = change.after;
-    const oldReceiptIds = new Set((change.before?.receivings ?? []).map((r) => r.id));
-    const addedReceipts = (po.receivings ?? []).filter((r) => !oldReceiptIds.has(r.id));
+    const oldReceiptIds = new Set((change.before?.receivings ?? []).map((r: PurchaseOrder["receivings"][number]) => r.id));
+    const addedReceipts = (po.receivings ?? []).filter((r: PurchaseOrder["receivings"][number]) => !oldReceiptIds.has(r.id));
     for (const receipt of addedReceipts) {
       const date = dateOf(receipt.date || po.poDate);
-      const receiptLines = (receipt.items ?? []).flatMap((r) => {
-        const item = po.items.find((i) => i.variantId === r.variantId);
+      const receiptLines: { productId: string; variantId: string; qty: number; unitCost: number }[] = (receipt.items ?? []).flatMap((r: PurchaseOrder["receivings"][number]["items"][number]) => {
+        const item = po.items.find((i: PurchaseOrder["items"][number]) => i.variantId === r.variantId);
         return item && r.qty > 0 ? [{ productId: item.productId, variantId: item.variantId, qty: r.qty, unitCost: r.unitCost || item.unitCost }] : [];
       });
       const landed = allocateLandedCost(receiptLines, po.receivings.length ? (po.shippingCost || 0) / po.receivings.length : 0);
@@ -142,12 +142,14 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
     const courierChanged = !!prev && ["delivered", "partial_delivered"].includes(prev.status) && actualCourierCost(prev) !== actualCourierCost(order);
     if (!isInitialOutcome && !gainedPartialDetails && !codChanged && !courierChanged) continue;
     const date = dateOf(order.delivery.deliveryDate || order.updatedAt || order.createdAt);
-    const itemIds = order.status === "partial_delivered" ? new Map((order.delivery.itemsKept ?? []).map((i) => [i.itemId, i.qty])) : null;
+    const itemIds = order.status === "partial_delivered"
+      ? new Map<string, number>((order.delivery.itemsKept ?? []).map((i: NonNullable<Order["delivery"]["itemsKept"]>[number]): [string, number] => [i.itemId, i.qty]))
+      : null;
     const saleLines: JournalEntryInputLine[] = [];
     const revenueByCode = new Map<string, number>();
     const stockMoves: { movement: InventoryMovement; layerUpdates: InventoryCostLayer[] }[] = [];
-    const costedOrderItems = order.status === "partial_delivered"
-      ? order.items.filter((i) => (itemIds?.get(i.id) ?? 0) > 0)
+    const costedOrderItems: Order["items"] = order.status === "partial_delivered"
+      ? order.items.filter((i: Order["items"][number]) => (itemIds?.get(i.id) ?? 0) > 0)
       : order.items;
     for (const item of costedOrderItems) {
       const qty = itemIds ? Math.min(item.qty, Math.max(0, itemIds.get(item.id) ?? 0)) : item.qty;
@@ -267,12 +269,13 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
   for (const [returnId, change] of changes.pos_returns ?? []) {
     const ret = change.after;
     if (!ret || change.before) continue;
-    const invoiceChange = [...(changes.pos_invoices ?? new Map())].find(([, c]) => c.after?.id === ret.invoiceId)?.[1];
+    const invoiceChanges: Map<string, Change<PosInvoice>> = changes.pos_invoices ?? new Map<string, Change<PosInvoice>>();
+    const invoiceChange = [...invoiceChanges].find(([, c]) => c.after?.id === ret.invoiceId)?.[1];
     const invoice = invoiceChange?.after;
     const lines: JournalEntryInputLine[] = [{ code: "4020", debit: ret.creditValue, credit: 0 }, { code: "1010", debit: 0, credit: ret.creditValue }];
     const movements: InventoryMovement[] = [];
-    for (const item of ret.items.filter((i) => i.condition === "resellable")) {
-      const sourceItem = invoice?.items.find((i) => i.id === item.invoiceItemId);
+    for (const item of ret.items.filter((i: PosReturn["items"][number]) => i.condition === "resellable")) {
+      const sourceItem = invoice?.items.find((i: PosInvoice["items"][number]) => i.id === item.invoiceItemId);
       const unitCost = sourceItem?.cost ?? 0;
       const amount = round2(unitCost * item.qty);
       const returnedProduct = await getProduct(item.productId);

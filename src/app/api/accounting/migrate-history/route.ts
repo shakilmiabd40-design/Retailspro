@@ -25,7 +25,7 @@ async function collect(client: PoolClient) {
   const [accounts, ledger, products, purchaseOrders, orders, invoices, apInvoices, coa] = await Promise.all([
     load<Account>("accounts"), load<LedgerEntry>("ledger"), load<Product>("products"),
     load<PurchaseOrder>("purchase_orders"), load<Order>("orders"), load<PosInvoice>("pos_invoices"), load<ApInvoice>("ap_invoices"),
-    load<ChartOfAccount>("chart_of_accounts"),
+    load<ChartOfAccount>("chart_of_accounts").then((rows) => rows.map((row) => row.data)),
   ]);
   const { rows: configRows } = await client.query<{ data: Partial<AccountingConfig> }>("select data from app_documents where key = 'accounting_config'");
   const config = { ...DEFAULT_ACCOUNTING_CONFIG, ...(configRows[0]?.data ?? {}), categoryAccounts: { ...DEFAULT_ACCOUNTING_CONFIG.categoryAccounts, ...(configRows[0]?.data?.categoryAccounts ?? {}) } };

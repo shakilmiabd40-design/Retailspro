@@ -555,9 +555,11 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       const wanted = new Map<string, { qty: number; label: string; productId: string }>();
       for (const i of [...newStock.reserved, ...newStock.consumed]) {
         const cur = wanted.get(i.variantId);
+        const product = products.find((p) => p.id === i.productId);
+        const variant = product?.variants.find((v) => v.id === i.variantId);
         wanted.set(i.variantId, {
           qty: (cur?.qty ?? 0) + i.qty,
-          label: `${i.productName} (${i.color}/${i.size})`,
+          label: `${product?.name ?? i.productId} (${variant?.color ?? "?"}/${variant?.size ?? "?"})`,
           productId: i.productId,
         });
       }

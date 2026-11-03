@@ -62,11 +62,11 @@ function line(id: string, accounts: ChartOfAccount[], code: string, debit: numbe
   return { id, accountId: account.id, accountCode: code, accountName: account.name, debit: round2(debit), credit: round2(credit), memo };
 }
 
-function journal(input: { id: string; date: string; ref: string; narration: string; source: JournalEntry["source"]; sourceId: string; lines: JournalLine[] }): JournalEntry {
+function journal(input: Pick<JournalEntry, "id" | "entryNumber" | "date" | "ref" | "narration" | "source" | "sourceId" | "lines">): JournalEntry {
   const totalDebit = round2(input.lines.reduce((s, l) => s + l.debit, 0));
   const totalCredit = round2(input.lines.reduce((s, l) => s + l.credit, 0));
   if (Math.abs(totalDebit - totalCredit) > 0.01) throw new Error(`Historical journal ${input.ref} is unbalanced.`);
-  return { ...input, entryNumber: input.ref, status: "posted", totalDebit, totalCredit, createdAt: new Date().toISOString(), createdBy: "Historical conversion", postedAt: new Date().toISOString(), postedBy: "Historical conversion" };
+  return { ...input, entryNumber: input.entryNumber || input.ref || input.id, status: "posted", totalDebit, totalCredit, createdAt: new Date().toISOString(), createdBy: "Historical conversion", postedAt: new Date().toISOString(), postedBy: "Historical conversion" };
 }
 
 /**

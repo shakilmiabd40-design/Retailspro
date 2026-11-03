@@ -19,6 +19,7 @@ interface Preview {
   estimates?: string[];
   pending?: number;
   count?: number;
+  posted?: number;
 }
 
 export function HistoryConversionCard() {
