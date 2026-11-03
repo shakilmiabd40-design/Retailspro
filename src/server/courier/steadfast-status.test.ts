@@ -33,6 +33,14 @@ test("a courier cancellation is a Refuse Return (the parcel is coming back), not
   assert.equal(mapSteadfastStatus("cancelled_return_received"), "refuse_return");
 });
 
+test("return_list and returned also map to Refuse Return (parcel entering the return manifest)", () => {
+  assert.equal(mapSteadfastStatus("return_list"), "refuse_return");
+  assert.equal(mapSteadfastStatus("returned"), "refuse_return");
+  // Case/separator variants
+  assert.equal(mapSteadfastStatus("Return_List"), "refuse_return");
+  assert.equal(mapSteadfastStatus("RETURNED"), "refuse_return");
+});
+
 test("amounts may arrive as numbers or numeric strings, and missing stays null (not 0)", () => {
   assert.equal(toAmount(100), 100);
   assert.equal(toAmount("100.50"), 100.5);

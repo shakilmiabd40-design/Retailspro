@@ -35,6 +35,15 @@ export const COLLECTION_ACCESS: Record<CollectionName, Access> = {
   // with only Reports permission must not be able to pull raw ledger rows via the sync API.
   accounts: { read: ["accounting"], write: ["accounting"] },
   ledger: { read: ["accounting"], write: ["accounting"] },
+  chart_of_accounts: { read: ["accounting", "reports"], write: ["accounting"] },
+  journal_entries: { read: ["accounting", "reports"], write: ["accounting"] },
+  grni: { read: ["accounting", "purchase", "reports"], write: ["accounting", "purchase", "inventory"] },
+  ap_invoices: { read: ["accounting", "purchase", "reports"], write: ["accounting", "purchase"] },
+  ar_invoices: { read: ["accounting", "orders", "reports"], write: ["accounting", "orders"] },
+  inventory_movements: { read: ["accounting", "inventory", "reports"], write: ["accounting", "inventory", "purchase", "orders", "pos"] },
+  stock_adjustments: { read: ["accounting", "inventory", "reports"], write: ["accounting", "inventory"] },
+  inventory_cost_layers: { read: ["accounting", "inventory", "reports"], write: ["accounting", "inventory", "purchase"] },
+  accounting_periods: { read: ["accounting", "reports"], write: ["accounting"] },
 };
 
 export const DOCUMENT_ACCESS: Record<DocumentKey, Access> = {

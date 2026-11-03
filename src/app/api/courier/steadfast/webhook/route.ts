@@ -45,6 +45,20 @@ function authorized(req: NextRequest, rawBody: string, token: string): boolean {
  * Steadfast retries 5xx and silence, but *never* retries a 4xx — so every request that passes the
  * auth check answers 200, even when the payload is one we can't use. Anything unusable is logged
  * instead of rejected, so nothing is silently lost.
+ *
+ * Supported notification_type values:
+ *   Status events (update the order in DB):
+ *     delivery_status    — primary status push from Steadfast
+ *     tracking_update    — in-transit position update; may also carry a new status
+ *     consignment_update — parcel detail change (e.g. COD amount on partial delivery)
+ *
+ *   Lifecycle events (logged, acknowledged, no order mutation):
+ *     return_list              — parcel added to Steadfast's return manifest
+ *     accepted_payment_request — Steadfast accepted a COD payment request
+ *     cancel_request           — cancellation request submitted
+ *     return_request           — return request submitted
+ *     pickup_request           — pickup request submitted
+ *     user_update              — account/user setting changed on Steadfast's side
  */
 export async function POST(req: NextRequest) {
   const token = process.env.STEADFAST_TOKEN?.trim();
@@ -71,14 +85,57 @@ export async function POST(req: NextRequest) {
 
   // Older Steadfast accounts push the status without a notification_type at all.
   const type = typeof event.notification_type === "string" ? event.notification_type.trim().toLowerCase() : "delivery_status";
-  // `consignment_update` is sent when the parcel's details (e.g. its COD amount) change, often
-  // without a new status. It has to be applied too, otherwise a partial-delivery amount revision
-  // never reaches the order's Customer Paid figure.
-  if (type !== "delivery_status" && type !== "tracking_update" && type !== "consignment_update") {
-    console.log(`[steadfast] ignoring notification_type=${type}`);
+
+  // ── Events that carry a consignment status or amount revision ──────────────
+  const isStatusEvent = type === "delivery_status" || type === "tracking_update" || type === "consignment_update";
+
+  // ── Steadfast lifecycle / request notification types ───────────────────────
+  // These inform us of workflow state changes on Steadfast's side. Steadfast
+  // sends a separate delivery_status push when the underlying order status actually
+  // changes, so we acknowledge these to stop retries without touching the order.
+  //
+  // return_list              — parcel placed on Steadfast's return manifest
+  // accepted_payment_request — Steadfast confirmed a COD payment request
+  // cancel_request           — merchant submitted a cancellation request
+  // return_request           — merchant submitted a return request
+  // pickup_request           — pickup request submitted
+  // user_update              — Steadfast account/user setting changed
+  const LIFECYCLE_TYPES = [
+    "return_list",
+    "accepted_payment_request",
+    "cancel_request",
+    "return_request",
+    "pickup_request",
+    "user_update",
+  ] as const;
+  const isLifecycleEvent = (LIFECYCLE_TYPES as readonly string[]).includes(type);
+
+  if (!isStatusEvent && !isLifecycleEvent) {
+    console.log(`[steadfast] ignoring unknown notification_type=${type}`);
     return NextResponse.json({ status: "received" });
   }
 
+  // ── Lifecycle events: log for audit and acknowledge immediately ────────────
+  // The real order-status change (cancelled, returned …) arrives later via
+  // a delivery_status event — we don't mutate orders here.
+  if (isLifecycleEvent) {
+    const consignment = event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment)
+      ? (event.consignment as Record<string, unknown>)
+      : null;
+    const consignmentId = String(
+      event.consignment_id ?? consignment?.consignment_id ?? consignment?.id ?? ""
+    ).trim();
+    const invoice = String(event.invoice ?? consignment?.invoice ?? "").trim();
+    console.log(
+      `[steadfast] lifecycle type=${type}` +
+        (consignmentId ? ` consignment=${consignmentId}` : "") +
+        (invoice ? ` invoice=${invoice}` : "") +
+        ` | ${JSON.stringify(event).slice(0, 400)}`
+    );
+    return NextResponse.json({ status: "received" });
+  }
+
+  // ── Status events: apply the new status / amounts to the matching order ────
   const text = (value: unknown) => (value === undefined || value === null ? "" : String(value).trim());
   const consignment =
     event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment)
@@ -117,7 +174,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(
-      `[steadfast] ${invoice || consignmentId}: status=${String(event.status ?? "—")} → ${result.changed ? "updated" : "no change"}` +
+      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? "—")} → ${result.changed ? "updated" : "no change"}` +
         (result.queuedEvents ? `, ${result.queuedEvents} webhook event(s) queued` : "")
     );
   } catch (err) {

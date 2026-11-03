@@ -20,6 +20,21 @@ export function normalizeSteadfastStatus(raw: unknown): string {
  *   - `in_review` (freshly booked, waiting for Steadfast's approval) and `hold` keep the order in Processing
  *   - `*_approval_pending` is only a rider's claim, not a confirmed outcome
  *   - `unknown` / `exceptional` need a human, so we don't guess a status for them
+ *
+ * Steadfast status reference (as seen in live payloads and their Laravel SDK):
+ *   in_review                    → Processing (pending Steadfast acceptance; we map to null)
+ *   pending                      → In Transit (accepted by Steadfast and in transit)
+ *   in_transit                   → In Transit
+ *   delivered                    → Delivered
+ *   partial_delivered            → Partial Delivered
+ *   partial_delivered_return_*   → Partial Delivered (parcel returning after partial delivery)
+ *   cancelled                    → Refuse Return (courier cancelled = parcel coming back)
+ *   cancelled_return_*           → Refuse Return
+ *   return_list                  → Refuse Return (added to return manifest)
+ *   returned                     → Refuse Return (physically returned to merchant)
+ *   hold                         → null (on hold; awaiting action)
+ *   *_approval_pending           → null (unconfirmed rider claim)
+ *   unknown / exceptional        → null (needs human review)
  */
 export function mapSteadfastStatus(raw: unknown): OrderStatus | null {
   const s = normalizeSteadfastStatus(raw);
@@ -30,12 +45,15 @@ export function mapSteadfastStatus(raw: unknown): OrderStatus | null {
   // is with the courier, so the order is In Transit (this is also the in_review → pending move).
   if (s === "pending" || s === "in_transit") return "in_transit";
   if (s === "delivered") return "delivered";
+
   // Covers partial_delivered and the partial_delivered_return_* follow-ups.
   if (s.startsWith("partial_delivered")) return "partial_delivered";
+
   // A courier cancellation means the parcel is coming back, so it is a Refuse Return in
   // RetailsPro. `cancelled` is reserved for orders cancelled before they reached the courier.
-  // Covers cancelled and cancelled_return_*.
-  if (s.startsWith("cancelled")) return "refuse_return";
+  // Covers: cancelled, cancelled_return_*, return_list, returned.
+  if (s.startsWith("cancelled") || s === "return_list" || s === "returned") return "refuse_return";
+
   return null;
 }
 
