@@ -143,7 +143,7 @@ export function buildDashboard(
   const sparkStart = hasCustom ? rangeFrom : addDays(today, -6);
   const ordersSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
     const d = addDays(sparkStart, i);
-    return { label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
+    return { label: d.toLocaleDateString("en-US", { day: "numeric" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
   });
 
   // ---- Net revenue KPI + sales chart (delivered online orders + POS walk-in sales; product sales + delivery billed − courier cost) ----
@@ -195,7 +195,7 @@ export function buildDashboard(
   }
   const revenueSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
     const d = addDays(sparkStart, i);
-    return { label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
+    return { label: d.toLocaleDateString("en-US", { day: "numeric" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
   });
 
   const chartDays = Math.min(Math.max(15, periodDays), 30);
@@ -204,7 +204,7 @@ export function buildDashboard(
     const d = addDays(chartStart, i);
     const k = dayKey(d);
     return {
-      label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }),
+      label: d.toLocaleDateString("en-US", { day: "numeric" }),
       income: Math.round(grossByDay.get(k) ?? 0),
       profit: Math.round(grossProfitByDay.get(k) ?? 0),
       netProfit: Math.round(netProfitByDay.get(k) ?? 0),

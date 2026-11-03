@@ -31,7 +31,7 @@ import {
 export default function OrderDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { getOrder, hydrated, markReturnReceived, updateCourierCharges, deleteOrder } = useOrders();
+  const { getOrder, hydrated, markReturnReceived, updateCourierCharges, updateCustomerPaid, deleteOrder } = useOrders();
   const { getProduct } = useProducts();
   const showToast = useToast();
   const order = getOrder(params.id);
@@ -45,6 +45,8 @@ export default function OrderDetailsPage() {
   const [chargeForward, setChargeForward] = useState(0);
   const [chargeReturn, setChargeReturn] = useState(0);
   const [chargeOther, setChargeOther] = useState(0);
+  const [paidOpen, setPaidOpen] = useState(false);
+  const [customerPaid, setCustomerPaid] = useState(0);
 
   if (!hydrated) {
     return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
@@ -292,9 +294,34 @@ export default function OrderDetailsPage() {
           {/* Delivery Result */}
           {(order.status === "delivered" || order.status === "partial_delivered" || order.status === "refuse_return") && (
             <section className="card p-5">
-              <p className="mb-3 text-[14px] font-semibold" style={{ color: "var(--text)" }}>
-                Delivery Result
-              </p>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>Delivery Result</p>
+                {(order.status === "delivered" || order.status === "partial_delivered") && !paidOpen && (
+                  <button
+                    onClick={() => { setCustomerPaid(order.delivery.customerPaid); setPaidOpen(true); }}
+                    className="focus-ring rounded-lg border px-3 py-1.5 text-[12.5px] font-medium"
+                    style={{ borderColor: "var(--border)", color: "var(--text)" }}
+                  >Update Customer Paid</button>
+                )}
+              </div>
+              {paidOpen && (
+                <div className="mb-4 flex flex-wrap items-end gap-2">
+                  <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--text-muted)" }}>
+                    Customer Paid / COD received (৳)
+                    <input type="number" min={0} step="0.01" value={customerPaid} onChange={(e) => setCustomerPaid(Number(e.target.value))} className="w-48 rounded-lg border px-3 py-2 text-[13px]" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }} />
+                  </label>
+                  <button
+                    onClick={() => {
+                      const result = updateCustomerPaid(order.id, customerPaid);
+                      if (!result.ok) showToast(result.error, "error");
+                      else { showToast("Customer Paid updated"); setPaidOpen(false); }
+                    }}
+                    className="focus-ring rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white"
+                    style={{ background: "var(--brand)" }}
+                  >Save Amount</button>
+                  <button onClick={() => setPaidOpen(false)} className="focus-ring rounded-xl border px-3.5 py-2 text-[13px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>Cancel</button>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
                 <Info label="Delivery Status" value={ORDER_STATUS_LABELS[order.status]} />
                 <Info label="Customer Paid" value={formatTaka(order.delivery.customerPaid, 2)} />

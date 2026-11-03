@@ -131,6 +131,8 @@ interface OrdersContextValue {
    * while In Transit and on any delivered outcome — the new amounts flow into every cost/profit figure.
    */
   updateCourierCharges: (id: string, input: CourierChargesInput) => { ok: true } | { ok: false; error: string };
+  /** Corrects the amount actually collected by the courier on a delivered order. */
+  updateCustomerPaid: (id: string, amount: number) => { ok: true } | { ok: false; error: string };
   cancelOrder: (id: string, input: CancelInput) => { ok: true } | { ok: false; error: string };
   /** Super Admin: edit any order at any status. Stock and warranties are reconciled automatically. */
   editOrder: (id: string, input: EditOrderInput) => { ok: true } | { ok: false; error: string };
@@ -444,6 +446,22 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }
 
+  function updateCustomerPaid(id: string, amount: number): { ok: true } | { ok: false; error: string } {
+    const order = getOrder(id);
+    if (!order) return { ok: false, error: "Order not found." };
+    if (order.status !== "delivered" && order.status !== "partial_delivered") {
+      return { ok: false, error: "Customer Paid can only be changed on delivered or partial delivered orders." };
+    }
+    if (!Number.isFinite(amount) || amount < 0) return { ok: false, error: "Customer Paid cannot be negative." };
+    if (amount === order.delivery.customerPaid) return { ok: true };
+    updateOrder(id, (o) => ({
+      ...o,
+      delivery: { ...o.delivery, customerPaid: amount },
+      activity: [...o.activity, activity("Customer Paid updated", `৳${o.delivery.customerPaid.toLocaleString()} → ৳${amount.toLocaleString()}`)],
+    }));
+    return { ok: true };
+  }
+
   function editOrder(id: string, input: EditOrderInput): { ok: true } | { ok: false; error: string } {
     const order = getOrder(id);
     if (!order) return { ok: false, error: "Order not found." };
@@ -664,6 +682,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       markRefuseReturn,
       markReturnReceived,
       updateCourierCharges,
+      updateCustomerPaid,
       cancelOrder,
       editOrder,
       deleteOrder,
