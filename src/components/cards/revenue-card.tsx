@@ -11,7 +11,7 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
     <div className="card flex flex-col p-5">
       <div className="mb-1 flex items-start justify-between">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
-          Net Revenue · Last 30 Days
+          {data.periodLabel ? `Net Revenue · ${data.periodLabel}` : "Net Revenue · Last 30 Days"}
         </p>
         <Wallet size={16} style={{ color: "var(--text-faint)" }} />
       </div>
@@ -23,10 +23,10 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
         {data.trend && <TrendPill trend={data.trend} />}
       </div>
       <p className="mt-0.5 text-[12px]" style={{ color: "var(--text-faint)" }}>
-        {formatCurrency(data.prev30)} in the previous 30 days
+        {data.prevLabel ?? `${formatCurrency(data.prev30)} in the previous period`}
       </p>
       <p className="mt-2 text-[11px]" style={{ color: "var(--text-faint)" }}>
-        Delivered orders, last 7 days
+        Delivered orders in period
       </p>
 
       <div className="mt-2 h-20">

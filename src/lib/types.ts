@@ -11,36 +11,41 @@ export type SparkPoint = { label: string; value: number };
 export type RangeKey = "all" | "week" | "month";
 
 export type OrdersKpi = {
-  /** Orders created in the last 30 days. */
+  /** Orders created in the selected date range. */
   last30: number;
-  /** Orders created in the 30 days before that. */
+  /** Orders created in the comparison date range. */
   prev30: number;
   trend: Trend | null;
-  /** Orders per day, last 7 days. */
+  /** Orders per day / interval sparkline. */
   sparkline: SparkPoint[];
+  periodLabel?: string;
+  prevLabel?: string;
 };
 
 export type CustomersKpi = {
   /** Unique customers (by phone number) across all orders. */
   total: number;
-  /** Growth in unique customers over the last 30 days. */
+  /** Growth in unique customers over the period. */
   trend: Trend | null;
-  /** Customers whose first order was in the last 30 days. */
+  /** Customers whose first order was in the period. */
   new30: number;
   newTrend: Trend | null;
   oneTimeCount: number;
   repeatCount: number;
   oneTimePct: number;
   repeatPct: number;
+  periodLabel?: string;
 };
 
 export type RevenueKpi = {
-  /** Delivered product revenue in the last 30 days. */
+  /** Delivered product revenue in the period. */
   last30: number;
   prev30: number;
   trend: Trend | null;
-  /** Delivered revenue per day, last 7 days. */
+  /** Delivered revenue trend data. */
   last7Days: SparkPoint[];
+  periodLabel?: string;
+  prevLabel?: string;
 };
 
 export type TopCategory = {

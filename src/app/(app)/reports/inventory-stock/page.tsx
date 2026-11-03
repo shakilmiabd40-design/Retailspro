@@ -7,6 +7,7 @@ import { useNotifications } from "@/lib/notifications/store";
 import { levelUpperBound, STATUS_LABELS } from "@/lib/notifications/engine";
 import { matchesProductFilters, productMeta } from "@/lib/reports/orders";
 import { num } from "@/lib/reports/format";
+import type { DateTypeKey } from "@/lib/reports/dates";
 import { useReportFilters } from "@/lib/reports/use-filters";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
@@ -38,6 +39,8 @@ const LABEL_COLOR: Record<StockLabel, { color: string; bg: string }> = {
   "Low Stock": { color: "#b45309", bg: "rgba(180, 83, 9, 0.14)" },
   "Out of Stock": { color: "var(--red)", bg: "var(--red-soft)" },
 };
+
+const DATE_TYPES: DateTypeKey[] = ["order_created"];
 
 export default function InventoryStockReportPage() {
   const state = useReportFilters("order_created");
@@ -121,6 +124,7 @@ export default function InventoryStockReportPage() {
       <ReportHeader title="Inventory Stock Report" description="Current stock, as of right now. This report isn't date-based." meta={`As of ${new Date().toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`} />
       <FilterBar
         state={state}
+        dateTypes={DATE_TYPES}
         product
         extra={
           <label className="block min-w-0">

@@ -29,7 +29,7 @@ export function CustomersCard({ data }: { data: CustomersKpi }) {
       <div className="my-4 flex items-center justify-between rounded-xl border px-3 py-2" style={{ borderColor: "var(--brand-tint-border)" }}>
         <div>
           <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            New Customers (30 days)
+            {data.periodLabel ? `New Customers (${data.periodLabel})` : "New Customers (30 days)"}
           </p>
           <p className="text-[15px] font-semibold" style={{ color: "var(--text)" }}>
             {formatCompact(data.new30)}

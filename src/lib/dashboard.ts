@@ -90,13 +90,40 @@ function topWithOther(counts: Map<string, number>, otherLabel = "Other"): [strin
   return top;
 }
 
-export function buildDashboard(orders: Order[], products: Product[], now: Date = new Date(), ledger: LedgerEntry[] = [], invoices: PosInvoice[] = []): DashboardData {
+export interface DashboardDateRange {
+  from: string; // YYYY-MM-DD
+  to: string;   // YYYY-MM-DD
+  label?: string;
+}
+
+export function buildDashboard(
+  orders: Order[],
+  products: Product[],
+  now: Date = new Date(),
+  ledger: LedgerEntry[] = [],
+  invoices: PosInvoice[] = [],
+  customRange?: DashboardDateRange
+): DashboardData {
   const today = startOfDay(now);
   const tomorrow = addDays(today, 1);
+
+  // Range determination
+  const hasCustom = !!customRange && !!customRange.from && !!customRange.to;
+  const rangeFrom = hasCustom ? startOfDay(parseLocal(customRange.from)) : addDays(today, -29);
+  const rangeTo = hasCustom ? addDays(startOfDay(parseLocal(customRange.to)), 1) : tomorrow; // exclusive upper bound
+  
+  // Previous comparison range of equal length
+  const durationMs = Math.max(86400000, rangeTo.getTime() - rangeFrom.getTime());
+  const prevFrom = new Date(rangeFrom.getTime() - durationMs);
+  const prevTo = new Date(rangeFrom.getTime());
+
+  const periodDays = Math.max(1, Math.round(durationMs / 86400000));
+  const periodLabel = customRange?.label ?? (hasCustom ? `${customRange.from} to ${customRange.to}` : "Last 30 Days");
+  const prevLabel = `${periodDays}d prior comparison`;
+
   const start7 = addDays(today, -6);
-  const start30 = addDays(today, -29);
-  const startPrev30 = addDays(today, -59);
-  const start15 = addDays(today, -14);
+  const start30 = rangeFrom;
+  const startPrev30 = prevFrom;
 
   const productById = new Map(products.map((p) => [p.id, p]));
   const variantById = new Map<string, { cost: number }>();
@@ -104,16 +131,19 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
 
   // ---- Orders KPI ----
   const createdAt = (o: Order) => new Date(o.createdAt).getTime();
-  const last30 = orders.filter((o) => inRange(createdAt(o), start30, tomorrow)).length;
-  const prev30 = orders.filter((o) => inRange(createdAt(o), startPrev30, start30)).length;
+  const last30 = orders.filter((o) => inRange(createdAt(o), rangeFrom, rangeTo)).length;
+  const prev30 = orders.filter((o) => inRange(createdAt(o), prevFrom, rangeFrom)).length;
   const ordersByDay = new Map<string, number>();
   for (const o of orders) {
     const k = dayKey(new Date(o.createdAt));
     ordersByDay.set(k, (ordersByDay.get(k) ?? 0) + 1);
   }
-  const ordersSpark: SparkPoint[] = Array.from({ length: 7 }, (_, i) => {
-    const d = addDays(start7, i);
-    return { label: d.toLocaleDateString("en-US", { weekday: "short" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
+  // Sparkline: if custom range is small (<= 14 days), show each day of the range; otherwise last 7 days of the range
+  const sparkDays = Math.min(Math.max(7, periodDays), 14);
+  const sparkStart = hasCustom ? rangeFrom : addDays(today, -6);
+  const ordersSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
+    const d = addDays(sparkStart, i);
+    return { label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
   });
 
   // ---- Net revenue KPI + sales chart (delivered online orders + POS walk-in sales; product sales + delivery billed − courier cost) ----
@@ -134,8 +164,8 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     grossByDay.set(k, (grossByDay.get(k) ?? 0) + gross);
     grossProfitByDay.set(k, (grossProfitByDay.get(k) ?? 0) + (gross - cost)); // before courier & other cost
     netProfitByDay.set(k, (netProfitByDay.get(k) ?? 0) + (revenue - cost)); // after courier & other cost
-    if (inRange(when.getTime(), start30, tomorrow)) revLast30 += revenue;
-    else if (inRange(when.getTime(), startPrev30, start30)) revPrev30 += revenue;
+    if (inRange(when.getTime(), rangeFrom, rangeTo)) revLast30 += revenue;
+    else if (inRange(when.getTime(), prevFrom, rangeFrom)) revPrev30 += revenue;
   }
   // POS walk-in sales count too — same rule as the Accounting P&L (net of returns; delivery-type POS sales
   // are skipped here because they are Orders and are already counted above).
@@ -154,8 +184,8 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     grossProfitByDay.set(k, (grossProfitByDay.get(k) ?? 0) + (revenue - cost));
     netProfitByDay.set(k, (netProfitByDay.get(k) ?? 0) + (revenue - cost));
     const t = new Date(inv.createdAt).getTime();
-    if (inRange(t, start30, tomorrow)) revLast30 += revenue;
-    else if (inRange(t, startPrev30, start30)) revPrev30 += revenue;
+    if (inRange(t, rangeFrom, rangeTo)) revLast30 += revenue;
+    else if (inRange(t, prevFrom, rangeFrom)) revPrev30 += revenue;
   }
 
   // Net profit also carries the day's running expenses (rent, boosting…) and other income from Accounting.
@@ -163,12 +193,15 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     if (e.kind === "expense") netProfitByDay.set(e.date, (netProfitByDay.get(e.date) ?? 0) - e.amount);
     else if (e.kind === "income") netProfitByDay.set(e.date, (netProfitByDay.get(e.date) ?? 0) + e.amount);
   }
-  const revenueSpark: SparkPoint[] = Array.from({ length: 7 }, (_, i) => {
-    const d = addDays(start7, i);
-    return { label: d.toLocaleDateString("en-US", { weekday: "short" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
+  const revenueSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
+    const d = addDays(sparkStart, i);
+    return { label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
   });
-  const salesChart: OrdersChartPoint[] = Array.from({ length: 15 }, (_, i) => {
-    const d = addDays(start15, i);
+
+  const chartDays = Math.min(Math.max(15, periodDays), 30);
+  const chartStart = hasCustom ? rangeFrom : addDays(today, -14);
+  const salesChart: OrdersChartPoint[] = Array.from({ length: chartDays }, (_, i) => {
+    const d = addDays(chartStart, i);
     const k = dayKey(d);
     return {
       label: d.toLocaleDateString("en-US", { day: "numeric", month: "short" }),
@@ -193,21 +226,24 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
   let newPrev30 = 0;
   let before30 = 0;
   for (const t of firstOrderAt.values()) {
-    if (t < start30.getTime()) before30 += 1;
-    if (inRange(t, start30, tomorrow)) new30 += 1;
-    else if (inRange(t, startPrev30, start30)) newPrev30 += 1;
+    if (t < rangeFrom.getTime()) before30 += 1;
+    if (inRange(t, rangeFrom, rangeTo)) new30 += 1;
+    else if (inRange(t, prevFrom, rangeFrom)) newPrev30 += 1;
   }
   const repeatCount = [...orderCountByCustomer.values()].filter((n) => n > 1).length;
   const oneTimeCount = totalCustomers - repeatCount;
 
   // ---- Categories + districts, per range ----
-  const rangeStart: Record<RangeKey, Date | null> = { all: null, week: start7, month: start30 };
+  const rangeStart: Record<RangeKey, Date | null> = hasCustom
+    ? { all: null, week: rangeFrom, month: rangeFrom }
+    : { all: null, week: start7, month: start30 };
   const topCategories = {} as Record<RangeKey, TopCategory[]>;
   const topDistricts = {} as Record<RangeKey, DistrictShare[]>;
 
   for (const range of Object.keys(rangeStart) as RangeKey[]) {
     const from = rangeStart[range];
-    const scoped = orders.filter((o) => isNetOrder(o) && (!from || inRange(createdAt(o), from, tomorrow)));
+    const toBound = hasCustom && range !== "all" ? rangeTo : tomorrow;
+    const scoped = orders.filter((o) => isNetOrder(o) && (!from || inRange(createdAt(o), from, toBound)));
 
     const catUnits = new Map<string, number>();
     for (const o of scoped) {
@@ -238,9 +274,12 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     }));
   }
 
-  // ---- Product sales table (units across net orders, all time) ----
+  // ---- Product sales table (units across net orders in the selected period if custom, or all time) ----
+  const scopedForProducts = hasCustom
+    ? orders.filter((o) => isNetOrder(o) && inRange(createdAt(o), rangeFrom, rangeTo))
+    : orders.filter(isNetOrder);
   const soldByProduct = new Map<string, { units: number; name: string }>();
-  for (const o of orders.filter(isNetOrder)) {
+  for (const o of scopedForProducts) {
     for (const i of o.items) {
       const cur = soldByProduct.get(i.productId);
       soldByProduct.set(i.productId, { units: (cur?.units ?? 0) + i.qty, name: cur?.name ?? i.productName });
@@ -267,7 +306,10 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     });
 
   // ---- Recent orders ----
-  const recentOrders = [...orders]
+  const scopedRecent = hasCustom
+    ? orders.filter((o) => inRange(createdAt(o), rangeFrom, rangeTo))
+    : orders;
+  const recentOrders = [...scopedRecent]
     .sort((a, b) => createdAt(b) - createdAt(a))
     .slice(0, 5)
     .map((o) => ({
@@ -280,7 +322,7 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
     }));
 
   return {
-    orders: { last30, prev30, trend: pctTrend(last30, prev30), sparkline: ordersSpark },
+    orders: { last30, prev30, trend: pctTrend(last30, prev30), sparkline: ordersSpark, periodLabel, prevLabel },
     customers: {
       total: totalCustomers,
       trend: pctTrend(totalCustomers, before30),
@@ -290,8 +332,9 @@ export function buildDashboard(orders: Order[], products: Product[], now: Date =
       repeatCount,
       oneTimePct: totalCustomers ? Math.round((oneTimeCount / totalCustomers) * 100) : 0,
       repeatPct: totalCustomers ? Math.round((repeatCount / totalCustomers) * 100) : 0,
+      periodLabel,
     },
-    revenue: { last30: revLast30, prev30: revPrev30, trend: pctTrend(revLast30, revPrev30), last7Days: revenueSpark },
+    revenue: { last30: revLast30, prev30: revPrev30, trend: pctTrend(revLast30, revPrev30), last7Days: revenueSpark, periodLabel, prevLabel },
     topCategories,
     salesChart,
     topDistricts,

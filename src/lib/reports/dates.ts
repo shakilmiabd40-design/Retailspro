@@ -29,7 +29,7 @@ export const DATE_TYPE_LABELS: Record<DateTypeKey, string> = {
   pos_sale: "Date",
 };
 
-export type PresetKey = "today" | "yesterday" | "last7" | "last30" | "this_month" | "last_month";
+export type PresetKey = "today" | "yesterday" | "last7" | "last30" | "this_month" | "last_month" | "all";
 
 export const PRESETS: { key: PresetKey; label: string }[] = [
   { key: "today", label: "Today" },
@@ -38,6 +38,7 @@ export const PRESETS: { key: PresetKey; label: string }[] = [
   { key: "last30", label: "Last 30 days" },
   { key: "this_month", label: "This Month" },
   { key: "last_month", label: "Last Month" },
+  { key: "all", label: "All Time" },
 ];
 
 export type GroupBy = "daily" | "weekly" | "monthly";
@@ -105,6 +106,11 @@ export function presetRange(key: PresetKey, now: Date = new Date()): { from: str
       return {
         from: toKey(new Date(today.getFullYear(), today.getMonth() - 1, 1)),
         to: toKey(new Date(today.getFullYear(), today.getMonth(), 0)),
+      };
+    case "all":
+      return {
+        from: "2020-01-01",
+        to: toKey(today),
       };
   }
 }

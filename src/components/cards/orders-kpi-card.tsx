@@ -11,7 +11,7 @@ export function OrdersKpiCard({ data }: { data: OrdersKpi }) {
     <div className="card flex flex-col p-5">
       <div className="mb-1 flex items-start justify-between">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
-          Orders · Last 30 Days
+          {data.periodLabel ? `Orders · ${data.periodLabel}` : "Orders · Last 30 Days"}
         </p>
         <ShoppingCart size={15} style={{ color: "var(--text-faint)" }} />
       </div>
@@ -23,7 +23,7 @@ export function OrdersKpiCard({ data }: { data: OrdersKpi }) {
         {data.trend && <TrendPill trend={data.trend} />}
       </div>
       <p className="mt-0.5 text-[12px]" style={{ color: "var(--text-faint)" }}>
-        {formatCompact(data.prev30)} in the previous 30 days
+        {data.prevLabel ?? `${formatCompact(data.prev30)} in the previous period`}
       </p>
 
       <div className="mt-3 h-20">

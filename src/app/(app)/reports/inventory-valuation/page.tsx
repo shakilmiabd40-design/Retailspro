@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
 import { deliveredDate, matchesProductFilters, productMeta } from "@/lib/reports/orders";
-import { formatDay } from "@/lib/reports/dates";
+import { formatDay, type DateTypeKey } from "@/lib/reports/dates";
 import { num, sum, taka, ymd } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
 import { FilterBar } from "@/components/reports/filter-bar";
@@ -26,6 +26,8 @@ interface ValueRow {
 }
 
 const DAY_MS = 86_400_000;
+
+const DATE_TYPES: DateTypeKey[] = ["order_created"];
 
 export default function InventoryValuationReportPage() {
   const state = useReportFilters("order_created");
@@ -104,6 +106,7 @@ export default function InventoryValuationReportPage() {
       <ReportHeader title="Inventory Valuation" description="What your stock on hand is worth at cost." meta={`As of ${new Date().toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`} />
       <FilterBar
         state={state}
+        dateTypes={DATE_TYPES}
         product
         extra={
           <>

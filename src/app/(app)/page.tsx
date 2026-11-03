@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Calendar, RotateCcw } from "lucide-react";
 import { OrdersKpiCard } from "@/components/cards/orders-kpi-card";
 import { CustomersCard } from "@/components/cards/customers-card";
 import { RevenueCard } from "@/components/cards/revenue-card";
@@ -9,13 +10,17 @@ import { OrdersChartCard } from "@/components/cards/orders-chart-card";
 import { TopDistrictsCard } from "@/components/cards/top-districts-card";
 import { ProductSalesTable } from "@/components/cards/product-sales-table";
 import { RecentOrdersList } from "@/components/cards/recent-orders-list";
-import { buildDashboard } from "@/lib/dashboard";
+import { buildDashboard, type DashboardDateRange } from "@/lib/dashboard";
 import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
 import { useAccounting } from "@/lib/accounting/store";
 import { usePos } from "@/lib/pos/store";
 import { useAccess } from "@/lib/settings/access";
 import { FinanceKpis } from "@/components/cards/finance-kpis";
+import { PRESETS, presetRange, type PresetKey } from "@/lib/reports/dates";
+
+const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
+const inputClass = "focus-ring rounded-xl border px-3 py-1.5 text-[12.5px]";
 
 export default function DashboardPage() {
   const { orders, hydrated: ordersReady } = useOrders();
@@ -23,14 +28,104 @@ export default function DashboardPage() {
   const { entries } = useAccounting();
   const { invoices } = usePos();
   const { can } = useAccess();
-  const data = useMemo(() => buildDashboard(orders, products, new Date(), entries, invoices), [orders, products, entries, invoices]);
+
+  // Dashboard Date Filter State
+  const [preset, setPreset] = useState<PresetKey | "custom">("last30");
+  const [from, setFrom] = useState(() => presetRange("last30").from);
+  const [to, setTo] = useState(() => presetRange("last30").to);
+
+  const dateRange: DashboardDateRange = useMemo(() => {
+    const label = PRESETS.find((p) => p.key === preset)?.label ?? `${from} to ${to}`;
+    return { from, to, label };
+  }, [from, to, preset]);
+
+  const data = useMemo(
+    () => buildDashboard(orders, products, new Date(), entries, invoices, dateRange),
+    [orders, products, entries, invoices, dateRange]
+  );
+
+  function handlePreset(p: PresetKey) {
+    setPreset(p);
+    const r = presetRange(p);
+    setFrom(r.from);
+    setTo(r.to);
+  }
+
+  function handleReset() {
+    handlePreset("last30");
+  }
 
   if (!ordersReady || !productsReady) {
     return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
   }
 
   return (
-    <>
+    <div className="space-y-5">
+      {/* Dashboard Date Filter Bar */}
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-3.5 sm:px-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 flex items-center gap-1.5 text-[12.5px] font-medium" style={{ color: "var(--text-muted)" }}>
+            <Calendar size={14} style={{ color: "var(--brand)" }} />
+            Period:
+          </span>
+          {PRESETS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => handlePreset(p.key)}
+              className="focus-ring rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors"
+              style={{
+                borderColor: preset === p.key ? "var(--brand)" : "var(--border)",
+                background: preset === p.key ? "var(--brand-soft)" : "transparent",
+                color: preset === p.key ? "var(--brand)" : "var(--text-muted)",
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11.5px]" style={{ color: "var(--text-faint)" }}>From</span>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setPreset("custom");
+              }}
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11.5px]" style={{ color: "var(--text-faint)" }}>To</span>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                setPreset("custom");
+              }}
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          {preset !== "last30" && (
+            <button
+              onClick={handleReset}
+              className="focus-ring flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--surface-2)]"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+              title="Reset to Last 30 Days"
+            >
+              <RotateCcw size={13} />
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main KPI Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <OrdersKpiCard data={data.orders} />
         <CustomersCard data={data.customers} />
@@ -38,7 +133,7 @@ export default function DashboardPage() {
         <TopCategoriesCard data={data.topCategories} />
       </div>
 
-      {can("accounting", "view") && <FinanceKpis />}
+      {can("accounting", "view") && <FinanceKpis from={from} to={to} label={dateRange.label} />}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
         <OrdersChartCard data={data.salesChart} />
@@ -49,6 +144,6 @@ export default function DashboardPage() {
         <ProductSalesTable data={data.products} />
         <RecentOrdersList data={data.recentOrders} />
       </div>
-    </>
+    </div>
   );
 }
