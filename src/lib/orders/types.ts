@@ -48,6 +48,8 @@ export interface CourierInfo {
 
 export interface DeliveryResult {
   customerPaid: number;
+  /** Quantities the customer kept on a partial delivery, keyed by order line id. */
+  itemsKept?: { itemId: string; qty: number }[];
   deliveryDate?: string;
   settlementStatus?: SettlementStatus;
 }

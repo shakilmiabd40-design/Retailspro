@@ -1,6 +1,6 @@
 import "server-only";
 import { query } from "../db";
-import { readPaidAmount } from "./steadfast-status";
+import { readCourierPaidAmount } from "./steadfast-status";
 
 /**
  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
@@ -160,7 +160,7 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
   const raw = res.data as Record<string, unknown>;
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
 
-  const cod = readPaidAmount(consignmentObj) ?? readPaidAmount(raw);
+  const cod = readCourierPaidAmount(raw, consignmentObj);
 
   return {
     ok: true,
@@ -191,7 +191,7 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
   if (!res.ok) return res;
   const raw = res.data as Record<string, unknown>;
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
-  const cod = readPaidAmount(consignmentObj) ?? readPaidAmount(raw);
+  const cod = readCourierPaidAmount(raw, consignmentObj);
   return {
     ok: true,
     data: {

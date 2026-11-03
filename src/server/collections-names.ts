@@ -22,6 +22,6 @@ export const COLLECTION_NAMES = [
   "inventory_cost_layers",
   "accounting_periods",
 ] as const;
-export const DOCUMENT_KEYS = ["settings", "catalog", "settlements", "notifications_data", "notifications_settings"] as const;
+export const DOCUMENT_KEYS = ["settings", "catalog", "settlements", "notifications_data", "notifications_settings", "order_notifications", "accounting_config"] as const;
 export type CollectionName = (typeof COLLECTION_NAMES)[number];
 export type DocumentKey = (typeof DOCUMENT_KEYS)[number];

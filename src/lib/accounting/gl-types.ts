@@ -71,6 +71,7 @@ export interface InventoryMovement {
   referenceType?: string;
   referenceId?: string;
   journalEntryId?: string;
+  estimatedCost?: boolean;
   createdAt: string;
   createdBy?: string;
 }
@@ -158,6 +159,23 @@ export interface AccountingPeriod {
   notes?: string;
 }
 
+export interface AccountingConfig {
+  baseCurrency: "BDT";
+  valuationMethod: "fifo";
+  taxEnabled: false;
+  /** GL account codes can be overridden by product category and transaction role. */
+  categoryAccounts: Record<string, { inventory?: string; cogs?: string; revenue?: string }>;
+  adjustmentAccountCode: string;
+}
+
+export const DEFAULT_ACCOUNTING_CONFIG: AccountingConfig = {
+  baseCurrency: "BDT",
+  valuationMethod: "fifo",
+  taxEnabled: false,
+  categoryAccounts: {},
+  adjustmentAccountCode: "5100",
+};
+
 export const DEFAULT_COA: Omit<ChartOfAccount, "id" | "createdAt">[] = [
   { code: "1000", name: "Assets", type: "asset", normalBalance: "debit", controlAccount: true, allowManual: false, isSystem: true },
   { code: "1010", name: "Cash in Hand", type: "asset", normalBalance: "debit", parentCode: "1000", controlAccount: false, allowManual: true, isSystem: true },
@@ -166,10 +184,12 @@ export const DEFAULT_COA: Omit<ChartOfAccount, "id" | "createdAt">[] = [
   { code: "1100", name: "Accounts Receivable", type: "asset", normalBalance: "debit", parentCode: "1000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "1200", name: "Inventory - Finished Goods", type: "asset", normalBalance: "debit", parentCode: "1000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "1210", name: "Inventory - Raw Materials", type: "asset", normalBalance: "debit", parentCode: "1000", controlAccount: false, allowManual: false, isSystem: true },
-  { code: "1300", name: "GRNI (Goods Received Not Invoiced)", type: "asset", normalBalance: "debit", parentCode: "1000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "2000", name: "Liabilities", type: "liability", normalBalance: "credit", controlAccount: true, allowManual: false, isSystem: true },
   { code: "2010", name: "Accounts Payable", type: "liability", normalBalance: "credit", parentCode: "2000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "2020", name: "Accrued Expenses", type: "liability", normalBalance: "credit", parentCode: "2000", controlAccount: false, allowManual: true, isSystem: true },
+  { code: "2030", name: "GRNI (Goods Received Not Invoiced)", type: "liability", normalBalance: "credit", parentCode: "2000", controlAccount: true, allowManual: false, isSystem: true },
+  { code: "2040", name: "VAT Payable", type: "liability", normalBalance: "credit", parentCode: "2000", controlAccount: false, allowManual: false, isSystem: true },
+  { code: "2050", name: "Courier Payable", type: "liability", normalBalance: "credit", parentCode: "2000", controlAccount: false, allowManual: false, isSystem: true },
   { code: "3000", name: "Equity", type: "equity", normalBalance: "credit", controlAccount: true, allowManual: false, isSystem: true },
   { code: "3010", name: "Owner Capital", type: "equity", normalBalance: "credit", parentCode: "3000", controlAccount: false, allowManual: true, isSystem: true },
   { code: "3020", name: "Retained Earnings", type: "equity", normalBalance: "credit", parentCode: "3000", controlAccount: true, allowManual: false, isSystem: true },
@@ -177,6 +197,7 @@ export const DEFAULT_COA: Omit<ChartOfAccount, "id" | "createdAt">[] = [
   { code: "4010", name: "Sales Revenue", type: "revenue", normalBalance: "credit", parentCode: "4000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "4020", name: "Sales Returns", type: "revenue", normalBalance: "debit", parentCode: "4000", controlAccount: false, allowManual: false, isSystem: true },
   { code: "4030", name: "Other Income", type: "revenue", normalBalance: "credit", parentCode: "4000", controlAccount: false, allowManual: true, isSystem: true },
+  { code: "4040", name: "Sales Discounts", type: "revenue", normalBalance: "debit", parentCode: "4000", controlAccount: false, allowManual: false, isSystem: true },
   { code: "5000", name: "Cost of Goods Sold", type: "expense", normalBalance: "debit", controlAccount: true, allowManual: false, isSystem: true },
   { code: "5010", name: "COGS - Finished Goods", type: "expense", normalBalance: "debit", parentCode: "5000", controlAccount: true, allowManual: false, isSystem: true },
   { code: "5020", name: "Purchase Price Variance", type: "expense", normalBalance: "debit", parentCode: "5000", controlAccount: false, allowManual: false, isSystem: true },

@@ -79,6 +79,7 @@ export function OrderEditForm({ order }: { order: Order }) {
   const [otherCost, setOtherCost] = useState(order.courier.otherCost);
 
   const [customerPaid, setCustomerPaid] = useState(order.delivery.customerPaid);
+  const [itemsKept, setItemsKept] = useState<Record<string, number>>(Object.fromEntries(order.items.map((item) => [item.id, order.delivery.itemsKept?.find((x) => x.itemId === item.id)?.qty ?? 0])));
   const [deliveryDate, setDeliveryDate] = useState(toDateInput(order.delivery.deliveryDate));
   const [settlement, setSettlement] = useState<SettlementStatus | "">(order.delivery.settlementStatus ?? "");
 
@@ -165,6 +166,7 @@ export function OrderEditForm({ order }: { order: Order }) {
       },
       delivery: {
         customerPaid,
+        ...(status === "partial_delivered" ? { itemsKept: items.map((item) => ({ itemId: item.id, qty: Math.max(0, Math.min(item.qty, itemsKept[item.id] ?? 0)) })) } : {}),
         deliveryDate: deliveryDate || undefined,
         settlementStatus: settlement || undefined,
       },
@@ -520,6 +522,7 @@ export function OrderEditForm({ order }: { order: Order }) {
                 <NumberInput value={customerPaid} onChange={setCustomerPaid} />
               </Field>
             )}
+            {status === "partial_delivered" && <div className="sm:col-span-2 rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}><p className="mb-2 text-[12px] font-semibold" style={{ color: "var(--text)" }}>Items customer kept</p><div className="space-y-2">{items.map((item) => <label key={item.id} className="flex items-center justify-between gap-3 text-[12px]" style={{ color: "var(--text-muted)" }}>{item.productName} · {item.color} / {item.size}<span className="flex items-center gap-2">Kept<input type="number" min={0} max={item.qty} step={1} value={itemsKept[item.id] ?? 0} onChange={(e) => setItemsKept((prev) => ({ ...prev, [item.id]: Math.min(item.qty, Math.max(0, Number(e.target.value))) }))} className="w-16 rounded-lg border px-2 py-1.5 text-center" style={inputStyle} /></span></label>)}</div></div>}
             <Field label="Delivery Date">
               <input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} className={inputClass} style={inputStyle} />
             </Field>

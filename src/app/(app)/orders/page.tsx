@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Plus, Printer, Eye, Pencil, Trash2, RefreshCcw, Ban, ChevronLeft, ChevronRight, X, Truck, CheckCircle2 } from "lucide-react";
+import { Search, Plus, Printer, Eye, Pencil, Trash2, RefreshCcw, Ban, ChevronLeft, ChevronRight, X, Truck, CheckCircle2, PackageCheck } from "lucide-react";
 import { useOrders } from "@/lib/orders/store";
 import { useSettlements } from "@/lib/settlements/store";
 import { useToast } from "@/components/toast";
@@ -32,7 +32,7 @@ const PAGE_SIZES = [20, 50, 100] as const;
 const ALL_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "delivered", "partial_delivered", "refuse_return", "cancelled"];
 
 function OrdersPageInner() {
-  const { orders, deleteOrder, dispatchOrder, recordSteadfastBooking } = useOrders();
+  const { orders, deleteOrder, dispatchOrder, recordSteadfastBooking, markReturnReceived } = useOrders();
   const { getRow, recordPayout } = useSettlements();
   const { settings } = useSettings();
   const showToast = useToast();
@@ -71,6 +71,8 @@ function OrdersPageInner() {
   const [dispatchProgress, setDispatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [movingToTransit, setMovingToTransit] = useState(false);
   const [confirmBulkMove, setConfirmBulkMove] = useState(false);
+  const [confirmBulkReturn, setConfirmBulkReturn] = useState(false);
+  const [receivingReturns, setReceivingReturns] = useState(false);
 
   const steadfastEnabled = settings.courier.steadfast?.enabled ?? false;
   const activeCouriers = settings.courier.couriers.filter((c) => c.status === "active");
@@ -84,6 +86,7 @@ function OrdersPageInner() {
   /** Pending or Processing orders can be handed to a courier. */
   const isDispatchable = (o: Order) => o.status === "pending" || o.status === "processing";
   const isMovableToTransit = (o: Order) => o.status === "processing";
+  const isReturnReceivable = (o: Order) => (o.status === "partial_delivered" || o.status === "refuse_return") && o.returnInfo.returnRequired && !o.returnInfo.returnReceived;
   const selectedOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isDispatchable(o)), [orders, selected]);
   const selectedMovableToTransit = useMemo(() => orders.filter((o) => selected.has(o.id) && isMovableToTransit(o)), [orders, selected]);
 
@@ -95,8 +98,9 @@ function OrdersPageInner() {
     return r.status !== "Settled" && r.pending > 0;
   };
 
-  const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o) || isMovableToTransit(o);
+  const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o) || isMovableToTransit(o) || isReturnReceivable(o);
   const selectedSettlableOrders = useMemo(() => orders.filter((o) => selected.has(o.id) && isSettlable(o)), [orders, selected]);
+  const selectedReturnReceivable = useMemo(() => orders.filter((o) => selected.has(o.id) && isReturnReceivable(o)), [orders, selected]);
 
   const courierCompanies = useMemo(
     () => Array.from(new Set(orders.map((o) => o.courier.company).filter(Boolean))).sort(),
@@ -325,6 +329,18 @@ function OrdersPageInner() {
     }
   }
 
+  function handleBulkReturnReceived() {
+    const targets = selectedReturnReceivable;
+    if (!targets.length || receivingReturns) return;
+    setReceivingReturns(true);
+    for (const order of targets) markReturnReceived(order.id);
+    const receivedIds = new Set(targets.map((order) => order.id));
+    setSelected((previous) => new Set([...previous].filter((id) => !receivedIds.has(id))));
+    setReceivingReturns(false);
+    setConfirmBulkReturn(false);
+    showToast(`Return received for ${targets.length} order${targets.length === 1 ? "" : "s"}; stock reservations released`, "success");
+  }
+
   function rowActionsFor(order: Order): RowAction[] {
     const actions: RowAction[] = [
       { label: "View", icon: Eye, onClick: () => router.push(`/orders/${order.id}`) },
@@ -514,6 +530,11 @@ function OrdersPageInner() {
                 Processing: {selectedMovableToTransit.length}
               </span>
             )}
+            {selectedReturnReceivable.length > 0 && (
+              <span className="ml-2 text-[12px]" style={{ color: "var(--amber, #b45309)" }}>
+                Returns to receive: {selectedReturnReceivable.length}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setSelected(new Set())} className="focus-ring rounded-xl border px-3 py-2 text-[12.5px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
@@ -550,6 +571,17 @@ function OrdersPageInner() {
               >
                 <CheckCircle2 size={15} />
                 {settling ? "Recording settlement..." : `Mark as Settled (${selectedSettlableOrders.length})`}
+              </button>
+            )}
+            {selectedReturnReceivable.length > 0 && (
+              <button
+                onClick={() => setConfirmBulkReturn(true)}
+                disabled={receivingReturns}
+                className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold disabled:opacity-50"
+                style={{ borderColor: "var(--brand)", color: "var(--brand)" }}
+              >
+                <PackageCheck size={15} />
+                {receivingReturns ? "Receiving…" : `Receive returns (${selectedReturnReceivable.length})`}
               </button>
             )}
           </div>
@@ -759,6 +791,14 @@ function OrdersPageInner() {
         confirmLabel="Confirm Settlement"
         onCancel={() => setConfirmBulkSettle(false)}
         onConfirm={handleBulkSettlement}
+      />
+      <ConfirmDialog
+        open={confirmBulkReturn}
+        title="Receive returned parcels"
+        message={`Confirm that ${selectedReturnReceivable.length} selected partial/refused parcel(s) are physically back. This releases the remaining reserved units to available stock; it does not mark the returned goods as sold.`}
+        confirmLabel="Confirm returns received"
+        onCancel={() => setConfirmBulkReturn(false)}
+        onConfirm={handleBulkReturnReceived}
       />
       <ConfirmDialog
         open={!!deleteTarget}

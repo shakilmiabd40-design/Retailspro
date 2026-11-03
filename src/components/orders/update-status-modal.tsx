@@ -71,6 +71,7 @@ export function UpdateStatusModal({
   const [returnCost, setReturnCost] = useState(0);
   const [otherCost, setOtherCost] = useState(0);
   const [reason, setReason] = useState("");
+  const [itemsKept, setItemsKept] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!open || !order) return;
@@ -89,6 +90,7 @@ export function UpdateStatusModal({
     setReturnCost(0);
     setOtherCost(0);
     setReason("");
+    setItemsKept(Object.fromEntries(order.items.map((item) => [item.id, 0])));
   }, [open, order]);
 
   if (!open || !order) return null;
@@ -108,6 +110,7 @@ export function UpdateStatusModal({
       } else {
         setCustomerPaid(0);
       }
+      setItemsKept(Object.fromEntries(order.items.map((item) => [item.id, 0])));
     }
     // "refuse" doesn't use customerPaid — it's forced to 0 on confirm.
   }
@@ -256,7 +259,13 @@ export function UpdateStatusModal({
       markDelivered(order.id, { customerPaid, deliveryDate, settlementStatus, forwardCost: forwardCharge });
       showToast(`Order #${order.orderNumber} marked Delivered`);
     } else if (outcome === "partial") {
-      markPartialDelivered(order.id, { customerPaid, forwardCost: forwardCharge, returnCost, otherCost, reason });
+      const keptCount = order.items.reduce((sum, item) => sum + (itemsKept[item.id] ?? 0), 0);
+      const totalCount = order.items.reduce((sum, item) => sum + item.qty, 0);
+      if (keptCount <= 0 || keptCount >= totalCount) {
+        showToast("Enter the quantity the customer kept. A partial delivery must also have items returning.", "error");
+        return;
+      }
+      markPartialDelivered(order.id, { customerPaid, itemsKept: order.items.map((item) => ({ itemId: item.id, qty: itemsKept[item.id] ?? 0 })), forwardCost: forwardCharge, returnCost, otherCost, reason });
       showToast(`Order #${order.orderNumber} marked Partial Delivered`);
     } else {
       markRefuseReturn(order.id, { forwardCost: forwardCharge, returnCost, otherCost });
@@ -442,6 +451,10 @@ export function UpdateStatusModal({
 
             {outcome === "partial" && (
               <div className="space-y-3">
+                <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+                  <p className="mb-2 text-[12px] font-semibold" style={{ color: "var(--text)" }}>Items customer kept</p>
+                  <div className="space-y-2">{order.items.map((item) => <label key={item.id} className="flex items-center justify-between gap-3 text-[12px]" style={{ color: "var(--text-muted)" }}><span>{item.productName} · {item.color} / {item.size} <span style={{ color: "var(--text-faint)" }}>({item.qty} sent)</span></span><span className="flex items-center gap-2">Kept<input type="number" min={0} max={item.qty} step={1} value={itemsKept[item.id] ?? 0} onChange={(e) => setItemsKept((prev) => ({ ...prev, [item.id]: Math.min(item.qty, Math.max(0, Number(e.target.value))) }))} className="w-16 rounded-lg border px-2 py-1.5 text-center" style={inputStyle} /></span></label>)}</div>
+                </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Courier Delivery Charge (৳)" hint="The fee the courier actually charges for the forward trip.">
                     <input type="number" min={0} value={forwardCharge} onChange={(e) => setForwardCharge(Number(e.target.value))} className={inputClass} style={inputStyle} />

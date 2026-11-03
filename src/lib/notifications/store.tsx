@@ -16,7 +16,7 @@ import {
   syncNotifications,
   type SkuSnapshot,
 } from "./engine";
-import { EMPTY_DATA } from "./types";
+import { EMPTY_DATA, EMPTY_ORDER_NOTIFICATIONS } from "./types";
 import { useDocument } from "@/lib/persist/hooks";
 import type {
   InventoryNotification,
@@ -25,6 +25,8 @@ import type {
   NotificationsData,
   OwnerRole,
   StatusTransition,
+  OrderCodUpdate,
+  OrderNotificationsData,
 } from "./types";
 
 const ACTOR = "You";
@@ -39,6 +41,7 @@ export interface BoardRow extends SkuSnapshot {
 
 interface NotificationsContextValue {
   notifications: InventoryNotification[];
+  orderUpdates: OrderCodUpdate[];
   board: BoardRow[];
   settings: NotificationSettings;
   hydrated: boolean;
@@ -49,6 +52,7 @@ interface NotificationsContextValue {
   linkedPurchaseOrders: (variantId: string) => PurchaseOrder[];
   markRead: (id: string) => void;
   markAllRead: () => void;
+  markOrderUpdateRead: (id: string) => void;
   acknowledge: (id: string) => void;
   acknowledgeAll: () => void;
   assign: (id: string, input: { ownerRole: OwnerRole; assignee?: string }) => void;
@@ -90,7 +94,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     force: true,
     normalize: (raw) => clampSettings({ ...DEFAULT_SETTINGS, ...(raw as Partial<NotificationSettings>) }),
   });
-  const loaded = dataLoaded && settingsLoaded;
+  const [orderNotificationData, setOrderNotificationData, orderNotificationsLoaded] = useDocument<OrderNotificationsData>("order_notifications", EMPTY_ORDER_NOTIFICATIONS);
+  const loaded = dataLoaded && settingsLoaded && orderNotificationsLoaded;
 
   const ready = loaded && productsReady && posReady;
   const snapshots = useMemo(() => (ready ? snapshotSkus(products, purchaseOrders) : []), [ready, products, purchaseOrders]);
@@ -166,10 +171,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<NotificationsContextValue>(
     () => ({
       notifications: data.notifications,
+      orderUpdates: orderNotificationData.updates,
       board,
       settings,
       hydrated: ready,
-      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length,
+      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length + orderNotificationData.updates.filter((n) => !n.read).length,
       getNotification: (id) => data.notifications.find((n) => n.id === id),
       historyFor: (variantId) => data.history.filter((h) => h.variantId === variantId).sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
       linkedPurchaseOrders: (variantId) =>
@@ -177,7 +183,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           .filter((po) => po.status !== "cancelled" && po.items.some((i) => i.variantId === variantId))
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       markRead: (id) => patchOne(id, (n) => (n.read ? n : { ...n, read: true })),
-      markAllRead: () => setData((prev) => ({ ...prev, notifications: prev.notifications.map((n) => (n.read ? n : { ...n, read: true })) })),
+      markAllRead: () => {
+        setData((prev) => ({ ...prev, notifications: prev.notifications.map((n) => (n.read ? n : { ...n, read: true })) }));
+        setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.read ? n : { ...n, read: true }) }));
+      },
+      markOrderUpdateRead: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.id === id ? { ...n, read: true } : n) })),
       acknowledge: (id) =>
         patchOne(id, (n, now) =>
           n.state !== "open" ? n : { ...n, state: "acknowledged", read: true, acknowledgedAt: now, activity: log(n, now, "Acknowledged", `By ${ACTOR}`) }
@@ -214,7 +224,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       updateSettings: (patch) => setSettings((prev) => clampSettings({ ...prev, ...patch })),
       resetSettings: () => setSettings(DEFAULT_SETTINGS),
     }),
-    [data, board, settings, ready, purchaseOrders, patchOne, setData, setSettings]
+    [data, board, settings, ready, purchaseOrders, patchOne, setData, setSettings, orderNotificationData, setOrderNotificationData]
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;

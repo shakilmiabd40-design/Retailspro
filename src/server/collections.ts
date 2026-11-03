@@ -55,7 +55,9 @@ export const DOCUMENT_ACCESS: Record<DocumentKey, Access> = {
   // the low-stock email) are only ever changed from the Notifications/Inventory settings screens, so they
   // follow the app's usual rule: a write action in inventory or settings is required — not just any session.
   notifications_data: { read: "any", write: "any" },
+  order_notifications: { read: "any", write: "any" },
   notifications_settings: { read: "any", write: ["inventory", "settings"] },
+  accounting_config: { read: ["accounting"], write: ["accounting"] },
 };
 
 export const isCollection = (n: string): n is CollectionName => (COLLECTION_NAMES as readonly string[]).includes(n);

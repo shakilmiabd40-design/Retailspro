@@ -3,10 +3,11 @@ import crypto from "node:crypto";
 import type { PoolClient } from "pg";
 import { bumpRev } from "@/server/seed";
 import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
-import { FINAL_STATUSES } from "@/lib/orders/utils";
+import { expectedCod, FINAL_STATUSES } from "@/lib/orders/utils";
 import type { Order } from "@/lib/orders/types";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readPaidAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, toAmount } from "./steadfast-status";
 import { COUNTER_START } from "@/server/collections";
+import { postAccountingChanges } from "@/server/accounting/auto-post";
 
 /** The fields Steadfast puts on a `delivery_status` / `tracking_update` webhook (or a status lookup). */
 export interface SteadfastStatusPayload {
@@ -27,6 +28,7 @@ export interface ApplyResult {
   changed: boolean;
   /** The order's status after applying the event. */
   orderStatus: Order["status"];
+  customerPaid?: number;
   queuedEvents: number;
   /** Set when the order status changed, so the caller can send the WhatsApp notification. */
   whatsapp?: { prev: Order; next: Order };
@@ -101,7 +103,7 @@ export async function applyStatusToOrder(
   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
   // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
   // same already-final status, or carry no status at all.
-  const cod = readPaidAmount(event) ?? readPaidAmount(consignment);
+  const cod = readCourierPaidAmount(event, consignment);
   const message = typeof field("tracking_message") === "string" ? String(field("tracking_message")).trim() : "";
   const rawHappenedAt = field("updated_at");
   const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
@@ -151,20 +153,24 @@ export async function applyStatusToOrder(
     }
   }
 
+  const codChanged = cod !== null && prev.delivery.customerPaid !== cod && (order.status === "delivered" || order.status === "partial_delivered");
   const label = mapped ? LABELS[mapped] : LABELS.none;
-  const detail = rawStatus ? `Steadfast status: ${rawStatus}${message ? ` — ${message}` : ""}` : message || "Steadfast update";
+  const codDetail = codChanged ? `Customer Paid changed ৳${(prev.delivery.customerPaid || expectedCod(prev)).toLocaleString()} → ৳${cod.toLocaleString()}` : "";
+  const statusDetail = rawStatus ? `Steadfast status: ${rawStatus}${message ? ` — ${message}` : ""}` : message || "Steadfast update";
+  const detail = [statusDetail, codDetail].filter(Boolean).join(" · ");
 
   // Steadfast retries webhooks; skip the write when nothing actually changed.
   const last = order.activity[order.activity.length - 1];
+  const sameStatusDetail = last?.detail === detail || (!codChanged && last?.detail?.startsWith(`${statusDetail} · Customer Paid changed `));
   const nothingNew =
     prev.status === order.status &&
     JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
     JSON.stringify(prev.delivery) === JSON.stringify(order.delivery) &&
     JSON.stringify(prev.returnInfo) === JSON.stringify(order.returnInfo) &&
     last?.label === label &&
-    last?.detail === detail;
+    sameStatusDetail;
 
-  if (nothingNew) return { found: true, changed: false, orderStatus: order.status, queuedEvents: 0 };
+  if (nothingNew) return { found: true, changed: false, orderStatus: order.status, customerPaid: order.delivery.customerPaid, queuedEvents: 0 };
 
   order.activity = [...order.activity, { id: crypto.randomUUID(), at: now, label, detail, by: "Steadfast" }];
   order.updatedAt = now;
@@ -177,10 +183,34 @@ export async function applyStatusToOrder(
   );
   await bumpRev(client, "orders");
 
+  await postAccountingChanges(client, { orders: new Map([[order.id, { before: prev, after: order }]]) }, updatedBy);
+
+  if (codChanged) {
+    const notification = {
+      id: crypto.randomUUID(),
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      previousAmount: prev.delivery.customerPaid || expectedCod(prev),
+      currentAmount: cod!,
+      timestamp: now,
+      source: "Steadfast",
+      read: false,
+    };
+    const { rows: notificationRows } = await client.query<{ data: { updates?: unknown[] } }>("select data from app_documents where key='order_notifications' for update");
+    const current = notificationRows[0]?.data ?? { updates: [] };
+    const updates = [...(current.updates ?? []), notification].slice(-200);
+    await client.query(
+      `insert into app_documents(key,data,updated_by) values('order_notifications',$1::jsonb,$2)
+       on conflict(key) do update set data=excluded.data,version=app_documents.version+1,updated_at=now(),updated_by=excluded.updated_by`,
+      [JSON.stringify({ updates }), updatedBy]
+    );
+    await bumpRev(client, "order_notifications");
+  }
+
   // Auto-create warranties when order becomes delivered
   if (prev.status !== "delivered" && order.status === "delivered") {
     try {
-      const { rows: docRows } = await client.query<{ data: any }>("select data from app_documents where key = 'settings' limit 1");
+      const { rows: docRows } = await client.query<{ data: { warranty?: { durationDays?: number }; invoice?: { numbering?: { warranty?: string } } } }>("select data from app_documents where key = 'settings' limit 1");
       const settings = docRows[0]?.data || {};
       const warrantyDays = Number(settings?.warranty?.durationDays) || 365;
       const warrantyPrefix = settings?.invoice?.numbering?.warranty || "WAR-";
@@ -224,6 +254,7 @@ export async function applyStatusToOrder(
     found: true,
     changed: true,
     orderStatus: order.status,
+    customerPaid: order.delivery.customerPaid,
     queuedEvents,
     whatsapp: prev.status !== order.status ? { prev, next: JSON.parse(JSON.stringify(order)) } : undefined,
   };

@@ -110,6 +110,21 @@ export interface NotificationsData {
   history: StatusTransition[];
 }
 
+export interface OrderCodUpdate {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  previousAmount: number;
+  currentAmount: number;
+  timestamp: string;
+  source: string;
+  read: boolean;
+}
+
+export interface OrderNotificationsData {
+  updates: OrderCodUpdate[];
+}
+
 export interface NotificationSettings {
   /** Available units at or below this → Replenish. */
   reorderPoint: number;
@@ -129,3 +144,4 @@ export interface NotificationSettings {
 }
 
 export const EMPTY_DATA: NotificationsData = { notifications: [], states: {}, history: [] };
+export const EMPTY_ORDER_NOTIFICATIONS: OrderNotificationsData = { updates: [] };

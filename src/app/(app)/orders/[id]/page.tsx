@@ -7,6 +7,7 @@ import { ArrowLeft, RefreshCcw, Ban, Printer, PackageCheck, Pencil, Trash2, Imag
 import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
 import { useToast } from "@/components/toast";
+import { api } from "@/lib/persist/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { OrderStatusBadge } from "@/components/orders/status-badge";
 import { OrderTimeline } from "@/components/orders/order-timeline";
@@ -47,6 +48,7 @@ export default function OrderDetailsPage() {
   const [chargeOther, setChargeOther] = useState(0);
   const [paidOpen, setPaidOpen] = useState(false);
   const [customerPaid, setCustomerPaid] = useState(0);
+  const [syncingCourier, setSyncingCourier] = useState(false);
 
   if (!hydrated) {
     return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
@@ -69,6 +71,19 @@ export default function OrderDetailsPage() {
   function handlePrintInvoice() {
     if (!order) return;
     router.push(`/orders/${order.id}/invoice`);
+  }
+
+  async function syncCourierCod() {
+    if (!order || syncingCourier) return;
+    setSyncingCourier(true);
+    try {
+      const result = await api<{ changed: boolean; customerPaid?: number; status?: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
+      showToast(result.changed ? `Steadfast COD synced: ${formatTaka(result.customerPaid ?? 0, 2)}` : `Steadfast COD is up to date: ${formatTaka(result.customerPaid ?? order.delivery.customerPaid, 2)}`, "success");
+    } catch (error) {
+      showToast(`Steadfast sync failed: ${error instanceof Error ? error.message : "please try again"}`, "error");
+    } finally {
+      setSyncingCourier(false);
+    }
   }
 
   const cost = actualCourierCost(order);
@@ -296,6 +311,11 @@ export default function OrderDetailsPage() {
             <section className="card p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>Delivery Result</p>
+                {order.courier.company.toLowerCase().includes("steadfast") && !!order.courier.trackingId && (
+                  <button onClick={syncCourierCod} disabled={syncingCourier} className="focus-ring rounded-lg border px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+                    {syncingCourier ? "Syncing COD…" : "Sync COD from Steadfast"}
+                  </button>
+                )}
                 {(order.status === "delivered" || order.status === "partial_delivered") && !paidOpen && (
                   <button
                     onClick={() => { setCustomerPaid(order.delivery.customerPaid); setPaidOpen(true); }}

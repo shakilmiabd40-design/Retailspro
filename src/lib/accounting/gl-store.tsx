@@ -1,12 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
-import { useCollection } from "@/lib/persist/hooks";
+import { useCollection, useDocument } from "@/lib/persist/hooks";
 import { useAccess } from "@/lib/settings/access";
 import { useAudit } from "@/lib/settings/audit";
 import { useAuth } from "@/lib/auth/context";
-import type { ChartOfAccount, JournalEntry, JournalLine, JournalStatus, InventoryMovement, InventoryCostLayer, StockAdjustment, GrniEntry, ApInvoice, AccountingPeriod } from "./gl-types";
-import { DEFAULT_COA } from "./gl-types";
+import type { AccountingConfig, ChartOfAccount, JournalEntry, JournalLine, InventoryMovement, InventoryCostLayer, StockAdjustment, GrniEntry, ApInvoice, AccountingPeriod, PeriodStatus } from "./gl-types";
+import { DEFAULT_ACCOUNTING_CONFIG, DEFAULT_COA } from "./gl-types";
 
 type Result = { ok: true; data?: any } | { ok: false; error: string };
 const fail = (error: string): Result => ({ ok: false, error });
@@ -30,11 +30,16 @@ interface GLContextValue {
   grni: GrniEntry[];
   apInvoices: ApInvoice[];
   periods: AccountingPeriod[];
+  config: AccountingConfig;
   hydrated: boolean;
   ensureDefaultCoa: () => void;
   addJournalEntry: (input: JournalEntryInput, post?: boolean) => Result;
   postJournalEntry: (id: string) => Result;
   reverseJournalEntry: (id: string, date: string, narration: string) => Result;
+  updateConfig: (next: AccountingConfig) => Result;
+  addChartAccount: (input: Omit<ChartOfAccount, "id" | "createdAt" | "updatedAt" | "isSystem">) => Result;
+  addPeriod: (from: string, to: string) => Result;
+  changePeriodStatus: (id: string, status: PeriodStatus) => Result;
   getAccountByCode: (code: string) => ChartOfAccount | undefined;
   trialBalance: (asOf?: string) => { lines: { account: ChartOfAccount; debit: number; credit: number }[]; totalDebit: number; totalCredit: number };
 }
@@ -58,6 +63,7 @@ export function GLProvider({ children }: { children: ReactNode }) {
   const [grni, setGrni, grniReady] = useCollection<GrniEntry>("grni");
   const [apInvoices, setApInvoices, apReady] = useCollection<ApInvoice>("ap_invoices");
   const [periods, setPeriods, periodsReady] = useCollection<AccountingPeriod>("accounting_periods");
+  const [config, setConfig, configReady] = useDocument<AccountingConfig>("accounting_config", DEFAULT_ACCOUNTING_CONFIG);
   const { can } = useAccess();
   const { log } = useAudit();
   const { user } = useAuth();
@@ -83,8 +89,8 @@ export function GLProvider({ children }: { children: ReactNode }) {
   }, [coaReady, coa.length]);
 
   const value = useMemo<GLContextValue>(() => ({
-    coa, journals, movements, layers, adjustments, grni, apInvoices, periods,
-    hydrated: coaReady && journalsReady && movementsReady && layersReady && adjustmentsReady && grniReady && apReady && periodsReady,
+    coa, journals, movements, layers, adjustments, grni, apInvoices, periods, config,
+    hydrated: coaReady && journalsReady && movementsReady && layersReady && adjustmentsReady && grniReady && apReady && periodsReady && configReady,
     ensureDefaultCoa() {
       if (coa.length > 0) return;
       const now = new Date().toISOString();
@@ -103,6 +109,7 @@ export function GLProvider({ children }: { children: ReactNode }) {
     },
     addJournalEntry(input, post=false) {
       if (!can("accounting", "create")) return fail("Permission denied");
+      if (post && !can("accounting", "approve")) return fail("Only an authorized approver can post journals.");
       const lines: JournalLine[] = input.lines.map(l => {
         const acc = coa.find(a=>a.id===l.accountId);
         return { id: uid(), accountId: l.accountId, accountCode: acc?.code, accountName: acc?.name, debit: round2(l.debit||0), credit: round2(l.credit||0), memo: l.memo };
@@ -146,7 +153,7 @@ export function GLProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     },
     reverseJournalEntry(id, date, narration) {
-      if (!can("accounting", "create")) return fail("Permission denied");
+      if (!can("accounting", "approve")) return fail("Only an authorized approver can post a reversal.");
       const orig = journals.find(j=>j.id===id);
       if (!orig) return fail("Journal not found");
       if (orig.status !== "posted") return fail("Only posted journals can be reversed");
@@ -169,24 +176,71 @@ export function GLProvider({ children }: { children: ReactNode }) {
         postedAt: now,
         postedBy: user?.name,
       };
-      setJournals(prev => [{ ...orig, reversedByEntryId: rev.id }, rev, ...prev.filter(j=>j.id!==id)]);
+      // Posted journals are immutable; the new posted reversal points back to the original.
+      setJournals(prev => [rev, ...prev]);
       log({ module: "Accounting", action: "create", entity: `Journal ${rev.entryNumber}`, summary: `Reversed ${orig.entryNumber} with ${rev.entryNumber}` });
       return { ok: true, data: rev };
+    },
+    updateConfig(next) {
+      if (!can("accounting", "edit")) return fail("Permission denied");
+      const validCodes = new Set(coa.filter((a) => !a.archived).map((a) => a.code));
+      if (!validCodes.has(next.adjustmentAccountCode)) return fail("Choose a valid stock adjustment account.");
+      for (const [category, mapping] of Object.entries(next.categoryAccounts)) {
+        if (!category.trim()) return fail("Category names cannot be empty.");
+        for (const code of [mapping.inventory, mapping.cogs, mapping.revenue]) if (code && !validCodes.has(code)) return fail(`Category “${category}” has an invalid account mapping.`);
+      }
+      setConfig({ ...next, baseCurrency: "BDT", valuationMethod: "fifo", taxEnabled: false });
+      log({ module: "Accounting", action: "edit", entity: "Accounting configuration", summary: "Updated accounting posting account mappings" });
+      return { ok: true };
+    },
+    addChartAccount(input) {
+      if (!can("accounting", "create")) return fail("Permission denied");
+      const code = input.code.trim();
+      const name = input.name.trim();
+      if (!/^\d{3,8}$/.test(code)) return fail("Account code must be 3 to 8 digits.");
+      if (name.length < 2) return fail("Account name must have at least 2 characters.");
+      if (coa.some((a) => a.code === code)) return fail("That account code already exists.");
+      if (input.parentId && !coa.some((a) => a.id === input.parentId && !a.archived)) return fail("Choose an active parent account.");
+      const account: ChartOfAccount = { ...input, code, name, id: uid(), isSystem: false, createdAt: new Date().toISOString() };
+      setCoa((prev) => [...prev, account]);
+      log({ module: "Accounting", action: "create", entity: `GL account ${account.code}`, summary: `Added chart account ${account.code} · ${account.name}` });
+      return { ok: true };
+    },
+    addPeriod(from, to) {
+      if (!can("accounting", "create")) return fail("Permission denied");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return fail("Enter a valid accounting period.");
+      if (periods.some((p) => from <= p.to && to >= p.from)) return fail("Accounting periods cannot overlap.");
+      setPeriods((prev) => [...prev, { id: uid(), from, to, status: "open" as const }].sort((a, b) => a.from.localeCompare(b.from)));
+      log({ module: "Accounting", action: "create", entity: "Accounting period", summary: `Created open accounting period ${from} to ${to}` });
+      return { ok: true };
+    },
+    changePeriodStatus(id, status) {
+      if (!can("accounting", "approve")) return fail("Only an authorized approver can close, lock, or reopen a period.");
+      const period = periods.find((p) => p.id === id);
+      if (!period) return fail("Accounting period not found.");
+      const allowed = (period.status === "open" && (status === "closed" || status === "locked")) || (period.status === "closed" && (status === "locked" || status === "open")) || (period.status === "locked" && status === "open");
+      if (!allowed) return fail("That accounting period status change is not allowed.");
+      const now = new Date().toISOString();
+      setPeriods((prev) => prev.map((p) => p.id === id ? { ...p, status, ...(status === "closed" ? { closedAt: now, closedBy: user.name } : {}), ...(status === "locked" ? { lockedAt: now, lockedBy: user.name } : {}), ...(period.status === "locked" && status === "open" ? { reopenedAt: now, reopenedBy: user.name } : {}) } : p));
+      log({ module: "Accounting", action: "status_change", entity: "Accounting period", summary: `${status === "open" && period.status === "locked" ? "Reopened" : status === "locked" ? "Locked" : "Closed"} period ${period.from} to ${period.to}` });
+      return { ok: true };
     },
     getAccountByCode(code) { return coa.find(a=>a.code===code); },
     trialBalance(asOf) {
       const lines: any[] = [];
       let totalDebit=0,totalCredit=0;
-      for (const acc of coa.filter(a=>!a.archived)) {
-        let debit=0, credit=0;
-        for (const je of journals) {
-          if (je.status!=="posted") continue;
-          if (asOf && je.date>asOf) continue;
-          for (const l of je.lines) {
-            if (l.accountId!==acc.id) continue;
-            debit += l.debit; credit += l.credit;
-          }
+      const totals = new Map<string, { debit: number; credit: number }>();
+      for (const je of journals) {
+        if (je.status !== "posted" || (asOf && je.date > asOf)) continue;
+        for (const item of je.lines) {
+          const total = totals.get(item.accountId) ?? { debit: 0, credit: 0 };
+          total.debit += item.debit;
+          total.credit += item.credit;
+          totals.set(item.accountId, total);
         }
+      }
+      for (const acc of coa.filter(a=>!a.archived)) {
+        const { debit = 0, credit = 0 } = totals.get(acc.id) ?? {};
         // apply normal balance view
         if (debit===0 && credit===0) continue;
         lines.push({ account: acc, debit: round2(debit), credit: round2(credit) });
@@ -194,7 +248,7 @@ export function GLProvider({ children }: { children: ReactNode }) {
       }
       return { lines, totalDebit: round2(totalDebit), totalCredit: round2(totalCredit) };
     }
-  }), [coa, journals, movements, layers, adjustments, grni, apInvoices, periods, coaReady, journalsReady, movementsReady, layersReady, adjustmentsReady, grniReady, apReady, periodsReady, can, log, user, setCoa, setJournals]);
+  }), [coa, journals, movements, layers, adjustments, grni, apInvoices, periods, config, coaReady, journalsReady, movementsReady, layersReady, adjustmentsReady, grniReady, apReady, periodsReady, configReady, can, log, user, setCoa, setJournals, setConfig]);
 
   return <GLContext.Provider value={value}>{children}</GLContext.Provider>;
 }

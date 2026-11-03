@@ -11,6 +11,9 @@ import { deliverDue, enqueueEvents, orderEvents, productEvents, type DomainEvent
 import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
 import type { Order } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
+import type { JournalEntry, ChartOfAccount, AccountingPeriod } from "@/lib/accounting/gl-types";
+import { assertJournalMutation } from "@/server/accounting/guards";
+import { postAccountingChanges, type AccountingChanges } from "@/server/accounting/auto-post";
 
 export const dynamic = "force-dynamic";
 
@@ -54,8 +57,11 @@ export const POST = route(async (req) => {
   const seeProductCost = canSeeProductCost(auth.role);
   let queuedEvents = 0;
   const whatsappNotifications: { prev: Order | undefined; next: Order }[] = [];
+  const journalMutations: { previous?: JournalEntry; next: JournalEntry | null }[] = [];
+  const periodMutations: { previous?: AccountingPeriod; next: AccountingPeriod | null }[] = [];
 
   await tx(async (client) => {
+    const accountingChanges: AccountingChanges = { orders: new Map(), products: new Map(), purchase_orders: new Map(), pos_invoices: new Map(), pos_returns: new Map(), stock_adjustments: new Map() };
     // Webhooks: only do the extra "what was it before?" reads when someone is actually listening.
     // (Fenced with a savepoint: if `npm run db:setup` hasn't been re-run yet the table is missing, and saving must still work.)
     let listening = false;
@@ -77,7 +83,8 @@ export const POST = route(async (req) => {
       let before = new Map<string, unknown>();
       // Read the stored rows when webhooks are listening (to diff), and also for products when the caller
       // can't see cost — so the real cost can be preserved over whatever redacted value they send back.
-      const needBefore = (name === "orders" && listening) || (name === "products" && (listening || !seeProductCost));
+      const accountingCollection = ["orders", "products", "purchase_orders", "pos_invoices", "pos_returns", "stock_adjustments"].includes(name);
+      const needBefore = accountingCollection || (name === "orders" && listening) || (name === "products" && (listening || !seeProductCost)) || name === "journal_entries" || name === "accounting_periods";
       if (needBefore) {
         const ids = [...upserts.map((u) => u?.id), ...deletes].filter((v): v is string => typeof v === "string");
         if (ids.length) {
@@ -98,6 +105,8 @@ export const POST = route(async (req) => {
         if (name === "orders") validateOrder(data);
         else if (name === "products") validateProduct(data);
         effective.set(u.id, data);
+        if (name === "journal_entries") journalMutations.push({ previous: before.get(u.id) as JournalEntry | undefined, next: data as unknown as JournalEntry });
+        if (name === "accounting_periods") periodMutations.push({ previous: before.get(u.id) as AccountingPeriod | undefined, next: data as unknown as AccountingPeriod });
         const payload = JSON.stringify(data);
         if (u.baseVersion === 0) {
           const r = await client.query("insert into app_records (collection, id, data, updated_by) values ($1,$2,$3::jsonb,$4) on conflict (collection, id) do nothing returning version", [name, u.id, payload, actor]);
@@ -114,9 +123,16 @@ export const POST = route(async (req) => {
         touched = true;
       }
       for (const id of deletes) {
+        if (name === "journal_entries") journalMutations.push({ previous: before.get(id) as JournalEntry | undefined, next: null });
+        if (name === "accounting_periods") periodMutations.push({ previous: before.get(id) as AccountingPeriod | undefined, next: null });
         if (typeof id !== "string") continue;
         await client.query("delete from app_records where collection = $1 and id = $2", [name, id]);
         touched = true;
+      }
+      if (accountingCollection) {
+        const target = accountingChanges[name as keyof AccountingChanges] as Map<string, { before?: unknown; after?: unknown }>;
+        for (const u of upserts) target.set(u.id, { before: before.get(u.id), after: effective.get(u.id) ?? u.data });
+        for (const id of deletes) if (typeof id === "string") target.set(id, { before: before.get(id) });
       }
       if (touched) revs[name] = await bumpRev(client, name);
 
@@ -195,6 +211,42 @@ export const POST = route(async (req) => {
     }
 
     if (conflicts.length) throw new ApiError(409, "conflict", "Someone else changed this data first.", { conflicts });
+
+    if (Object.values(accountingChanges).some((changes) => changes?.size)) {
+      try {
+        await postAccountingChanges(client, accountingChanges, actor);
+      } catch (err) {
+        throw new ApiError(422, "accounting_post_failed", err instanceof Error ? err.message : "Automatic accounting posting failed.");
+      }
+    }
+
+    if (periodMutations.some((m) => m.previous ? m.previous.status !== m.next?.status : m.next?.status !== "open") && !roleHas(auth.role, "accounting", "approve")) {
+      throw new ApiError(403, "forbidden", "Only an authorized approver can close, lock, or reopen accounting periods.");
+    }
+    for (const mutation of periodMutations) {
+      if (mutation.previous && !mutation.next && mutation.previous.status !== "open") throw new ApiError(422, "invalid_period", "Closed or locked periods cannot be deleted.");
+      if (mutation.previous && mutation.next && (mutation.previous.from !== mutation.next.from || mutation.previous.to !== mutation.next.to)) throw new ApiError(422, "invalid_period", "Accounting period dates cannot be edited after creation.");
+      if (mutation.next && (!/^\d{4}-\d{2}-\d{2}$/.test(mutation.next.from) || !/^\d{4}-\d{2}-\d{2}$/.test(mutation.next.to) || mutation.next.from > mutation.next.to)) throw new ApiError(422, "invalid_period", "Accounting period dates are invalid.");
+    }
+    if (periodMutations.length) {
+      const { rows: currentPeriods } = await client.query<{ id: string; data: AccountingPeriod }>("select id,data from app_records where collection = 'accounting_periods'");
+      const sorted = currentPeriods.map((r) => r.data).sort((a, b) => a.from.localeCompare(b.from));
+      for (let i = 1; i < sorted.length; i += 1) if (sorted[i].from <= sorted[i - 1].to) throw new ApiError(422, "invalid_period", "Accounting periods cannot overlap.");
+    }
+
+    if (journalMutations.length) {
+      const [{ rows: accountRows }, { rows: periodRows }] = await Promise.all([
+        client.query<{ data: ChartOfAccount }>("select data from app_records where collection = 'chart_of_accounts'"),
+        client.query<{ data: AccountingPeriod }>("select data from app_records where collection = 'accounting_periods'"),
+      ]);
+      for (const mutation of journalMutations) {
+        try {
+          assertJournalMutation(mutation.previous, mutation.next, accountRows.map((r) => r.data), periodRows.map((r) => r.data));
+        } catch (err) {
+          throw new ApiError(422, "invalid_journal", err instanceof Error ? err.message : "Invalid journal entry.");
+        }
+      }
+    }
 
     if (events.length) {
       await client.query("savepoint webhook_outbox");

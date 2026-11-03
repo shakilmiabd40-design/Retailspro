@@ -8,7 +8,7 @@ import { runtime } from "@/lib/settings/runtime";
 import { useSettings } from "@/lib/settings/store";
 import { useCollection } from "@/lib/persist/hooks";
 import { takeNumber } from "@/lib/persist/numbers";
-import { cancelReasonLabel, canCancelOrder, describeOrderChanges, foldOrderDiscount, stockEffectFor } from "./utils";
+import { cancelReasonLabel, canCancelOrder, describeOrderChanges, foldOrderDiscount } from "./utils";
 import type {
   CancelReason,
   CancellationInfo,
@@ -60,6 +60,7 @@ export type DeliveredInput = {
 
 export type PartialInput = {
   customerPaid: number;
+  itemsKept: { itemId: string; qty: number }[];
   forwardCost?: number;
   returnCost: number;
   otherCost: number;
@@ -105,6 +106,18 @@ export type EditOrderInput = {
 
 function itemsAsLineItems(items: OrderItem[]): StockLineItem[] {
   return items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: i.qty }));
+}
+
+function stockBuckets(order: Order): { reserved: StockLineItem[]; consumed: StockLineItem[] } {
+  if (order.status === "delivered") return { reserved: [], consumed: itemsAsLineItems(order.items) };
+  if (order.status === "partial_delivered" && order.delivery.itemsKept) {
+    const kept = new Map(order.delivery.itemsKept.map((item) => [item.itemId, item.qty]));
+    const consumed = order.items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: Math.min(i.qty, Math.max(0, kept.get(i.id) ?? 0)) })).filter((i) => i.qty > 0);
+    const reserved = order.returnInfo.returnReceived ? [] : order.items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: i.qty - Math.min(i.qty, Math.max(0, kept.get(i.id) ?? 0)) })).filter((i) => i.qty > 0);
+    return { reserved, consumed };
+  }
+  if (order.status === "cancelled" || (order.status === "refuse_return" && order.returnInfo.returnReceived)) return { reserved: [], consumed: [] };
+  return { reserved: itemsAsLineItems(order.items), consumed: [] };
 }
 
 function activity(label: string, detail?: string) {
@@ -357,13 +370,19 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   function markPartialDelivered(id: string, input: PartialInput) {
     const order = getOrder(id);
     if (!order || order.status !== "in_transit") return;
-    // Stock stays reserved ("Returning") until the parcel is physically back — unless Settings say a return confirmation isn't needed.
-    if (autoReceiveReturns) releaseStock(itemsAsLineItems(order.items));
+    const requestedKept = new Map(input.itemsKept.map((i) => [i.itemId, i.qty]));
+    const keptById = new Map(order.items.map((i) => [i.id, Math.min(i.qty, Math.max(0, requestedKept.get(i.id) ?? 0))]));
+    const kept = order.items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: keptById.get(i.id) ?? 0 })).filter((i) => i.qty > 0);
+    const returned = order.items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: i.qty - (keptById.get(i.id) ?? 0) })).filter((i) => i.qty > 0);
+    if (kept.reduce((sum, i) => sum + i.qty, 0) === 0 || returned.reduce((sum, i) => sum + i.qty, 0) === 0) return;
+    consumeStock(kept);
+    // Returned units remain reserved until physically back; auto-receive only releases that remainder.
+    if (autoReceiveReturns) releaseStock(returned);
     updateOrder(id, (o) => ({
       ...o,
       status: "partial_delivered",
       courier: { ...o.courier, forwardCost: input.forwardCost ?? o.courier.forwardCost, returnCost: input.returnCost, otherCost: input.otherCost },
-      delivery: { ...o.delivery, customerPaid: input.customerPaid },
+      delivery: { ...o.delivery, customerPaid: input.customerPaid, itemsKept: order.items.map((i) => ({ itemId: i.id, qty: keptById.get(i.id) ?? 0 })) },
       returnInfo: autoReceiveReturns ? { returnRequired: true, returnReceived: true, returnDate: new Date().toISOString() } : { returnRequired: true, returnReceived: false },
       activity: [
         ...o.activity,
@@ -403,7 +422,10 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     if (!order) return;
     if (order.status !== "partial_delivered" && order.status !== "refuse_return") return;
     if (!order.returnInfo.returnRequired || order.returnInfo.returnReceived) return;
-    releaseStock(itemsAsLineItems(order.items));
+    const releaseItems = order.status === "partial_delivered" && order.delivery.itemsKept
+      ? order.items.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: Math.max(0, i.qty - (order.delivery.itemsKept?.find((x) => x.itemId === i.id)?.qty ?? 0)) })).filter((i) => i.qty > 0)
+      : itemsAsLineItems(order.items);
+    releaseStock(releaseItems);
     const now = new Date().toISOString();
     updateOrder(id, (o) => ({
       ...o,
@@ -467,6 +489,13 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     if (!order) return { ok: false, error: "Order not found." };
     if (!input.items.length) return { ok: false, error: "An order needs at least one product." };
     if (input.items.some((i) => i.qty < 1)) return { ok: false, error: "Every product needs a quantity of at least 1." };
+    if (input.status === "partial_delivered") {
+      const kept = new Map((input.delivery.itemsKept ?? []).map((x) => [x.itemId, x.qty]));
+      if (input.items.some((i) => !Number.isInteger(kept.get(i.id) ?? 0) || (kept.get(i.id) ?? 0) < 0 || (kept.get(i.id) ?? 0) > i.qty)) return { ok: false, error: "Kept quantities must be whole numbers between zero and the shipped quantity." };
+      const keptTotal = input.items.reduce((sum, i) => sum + (kept.get(i.id) ?? 0), 0);
+      const total = input.items.reduce((sum, i) => sum + i.qty, 0);
+      if (keptTotal <= 0 || keptTotal >= total) return { ok: false, error: "A partial delivery needs at least one item kept and at least one item returning." };
+    }
 
     const now = new Date().toISOString();
     const isReturnStatus = input.status === "partial_delivered" || input.status === "refuse_return";
@@ -516,17 +545,15 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       cancellation,
     };
 
-    const oldEffect = stockEffectFor(order);
-    const newEffect = stockEffectFor(next);
+    const oldStock = stockBuckets(order);
+    const newStock = stockBuckets(next);
 
     // Availability check for demand that is genuinely new (what this order already holds is credited back).
-    if (newEffect !== "none") {
+    if (newStock.reserved.length || newStock.consumed.length) {
       const heldBefore = new Map<string, number>();
-      if (oldEffect !== "none") {
-        for (const i of order.items) heldBefore.set(i.variantId, (heldBefore.get(i.variantId) ?? 0) + i.qty);
-      }
+      for (const i of [...oldStock.reserved, ...oldStock.consumed]) heldBefore.set(i.variantId, (heldBefore.get(i.variantId) ?? 0) + i.qty);
       const wanted = new Map<string, { qty: number; label: string; productId: string }>();
-      for (const i of next.items) {
+      for (const i of [...newStock.reserved, ...newStock.consumed]) {
         const cur = wanted.get(i.variantId);
         wanted.set(i.variantId, {
           qty: (cur?.qty ?? 0) + i.qty,
@@ -548,47 +575,12 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Stock reconciliation.
-    const key = (i: { productId: string; variantId: string }) => `${i.productId}:${i.variantId}`;
-    if (oldEffect === newEffect && oldEffect !== "none") {
-      // Same kind of hold before and after — only move the per-variant difference.
-      const oldQty = new Map<string, number>();
-      const newQty = new Map<string, number>();
-      const meta = new Map<string, { productId: string; variantId: string }>();
-      for (const i of order.items) {
-        oldQty.set(key(i), (oldQty.get(key(i)) ?? 0) + i.qty);
-        meta.set(key(i), i);
-      }
-      for (const i of next.items) {
-        newQty.set(key(i), (newQty.get(key(i)) ?? 0) + i.qty);
-        meta.set(key(i), i);
-      }
-      const plus: StockLineItem[] = [];
-      const minus: StockLineItem[] = [];
-      for (const [k, m] of meta) {
-        const diff = (newQty.get(k) ?? 0) - (oldQty.get(k) ?? 0);
-        if (diff > 0) plus.push({ productId: m.productId, variantId: m.variantId, qty: diff });
-        if (diff < 0) minus.push({ productId: m.productId, variantId: m.variantId, qty: -diff });
-      }
-      if (oldEffect === "reserved") {
-        if (plus.length) reserveStock(plus);
-        if (minus.length) releaseStock(minus);
-      } else {
-        if (plus.length) {
-          reserveStock(plus);
-          consumeStock(plus);
-        }
-        if (minus.length) restoreStock(minus);
-      }
-    } else {
-      if (oldEffect === "reserved") releaseStock(itemsAsLineItems(order.items));
-      if (oldEffect === "consumed") restoreStock(itemsAsLineItems(order.items));
-      if (newEffect === "reserved") reserveStock(itemsAsLineItems(next.items));
-      if (newEffect === "consumed") {
-        reserveStock(itemsAsLineItems(next.items));
-        consumeStock(itemsAsLineItems(next.items));
-      }
-    }
+    // Restore the old stock effects, then apply the new composition. This handles partial orders
+    // which simultaneously contain customer-kept (consumed) and returning (reserved) quantities.
+    if (oldStock.reserved.length) releaseStock(oldStock.reserved);
+    if (oldStock.consumed.length) restoreStock(oldStock.consumed);
+    if (newStock.reserved.length) reserveStock(newStock.reserved);
+    if (newStock.consumed.length) { reserveStock(newStock.consumed); consumeStock(newStock.consumed); }
 
     // Warranty reconciliation (warranties exist only for delivered orders).
     const wasDelivered = order.status === "delivered";
@@ -657,9 +649,9 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   function deleteOrder(id: string): { ok: true } | { ok: false; error: string } {
     const order = getOrder(id);
     if (!order) return { ok: false, error: "Order not found." };
-    const effect = stockEffectFor(order);
-    if (effect === "reserved") releaseStock(itemsAsLineItems(order.items));
-    if (effect === "consumed") restoreStock(itemsAsLineItems(order.items));
+    const stock = stockBuckets(order);
+    if (stock.reserved.length) releaseStock(stock.reserved);
+    if (stock.consumed.length) restoreStock(stock.consumed);
     if (order.status === "delivered") {
       for (const i of order.items) voidWarrantiesForOrderItem(order.id, i.variantId, "Order deleted by Super Admin");
     }

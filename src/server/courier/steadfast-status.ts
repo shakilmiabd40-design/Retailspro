@@ -80,6 +80,25 @@ export function toAmount(raw: unknown): number | null {
  */
 export function readPaidAmount(source: Record<string, unknown> | null | undefined): number | null {
   if (!source) return null;
+  const collectedKeys = ["collected_amount", "collectedAmount", "paid_amount", "paidAmount", "customer_paid", "customerPaid", "received_amount", "receivedAmount"];
+  const codKeys = [
+    "cod_amount",
+    "codAmount",
+    "amount",
+  ];
+  for (const key of collectedKeys) {
+    const value = toAmount(source[key]);
+    if (value !== null) return value;
+  }
+  for (const key of codKeys) {
+    const value = toAmount(source[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function readExplicitCollectedAmount(source: Record<string, unknown> | null | undefined): number | null {
+  if (!source) return null;
   const keys = [
     "collected_amount",
     "collectedAmount",
@@ -89,13 +108,15 @@ export function readPaidAmount(source: Record<string, unknown> | null | undefine
     "customerPaid",
     "received_amount",
     "receivedAmount",
-    "cod_amount",
-    "codAmount",
-    "amount",
   ];
   for (const key of keys) {
     const value = toAmount(source[key]);
     if (value !== null) return value;
   }
   return null;
+}
+
+/** When a flat payload and nested consignment disagree, trust the consignment's collected amount first. */
+export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
+  return readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event) ?? readPaidAmount(consignment) ?? readPaidAmount(event);
 }
