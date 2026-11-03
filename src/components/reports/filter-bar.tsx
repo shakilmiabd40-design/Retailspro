@@ -1,15 +1,14 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Printer, RotateCcw } from "lucide-react";
-import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
 import { useSuppliers } from "@/lib/suppliers/store";
 import { ORDER_STATUS_LABELS } from "@/lib/orders/utils";
-import { uniqueCouriers } from "@/lib/reports/orders";
 import { DATE_TYPE_LABELS, PRESETS, presetRange, type DateTypeKey, type GroupBy, type SettlementLabel } from "@/lib/reports/dates";
 import type { ReportFilterState } from "@/lib/reports/use-filters";
 import type { OrderStatus } from "@/lib/orders/types";
+import { api } from "@/lib/persist/api";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
@@ -48,12 +47,29 @@ const GROUPS: { key: GroupBy; label: string }[] = [
 ];
 
 export function FilterBar({ state, dateTypes, statusOptions, courier, supplier, product, settlement, groupBy, extra, onDateTypeChange }: FilterBarProps) {
-  const { orders } = useOrders();
   const { products } = useProducts();
   const { suppliers } = useSuppliers();
+  const [couriers, setCouriers] = useState<string[]>([]);
   const { draft, applied, setDraft, applyPatch, apply, reset, dirty } = state;
 
-  const couriers = useMemo(() => uniqueCouriers(orders), [orders]);
+  useEffect(() => {
+    if (!courier) return;
+    let current = true;
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const result = await api<{ couriers: string[] }>("GET", "/api/orders/couriers");
+        if (current) setCouriers(result.couriers);
+      } catch { /* Keep the last good courier options. */ }
+      finally { inFlight = false; }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 60_000);
+    return () => { current = false; clearInterval(timer); };
+  }, [courier]);
+
   const categories = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products]);
   const brands = useMemo(() => [...new Set(products.map((p) => p.brand).filter(Boolean))].sort(), [products]);
 

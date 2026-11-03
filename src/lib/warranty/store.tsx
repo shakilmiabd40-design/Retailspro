@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useCollection } from "@/lib/persist/hooks";
 import { takeNumberOrFallback } from "@/lib/persist/numbers";
 import type { ClaimStatus, Warranty } from "./types";
@@ -37,8 +38,12 @@ interface WarrantyContextValue {
 const WarrantyContext = createContext<WarrantyContextValue | null>(null);
 
 export function WarrantyProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
   const { settings } = useSettings();
-  const [warranties, setWarranties, hydrated] = useCollection<Warranty>("warranties");
+  const warrantiesActive = pathname.startsWith("/orders") || pathname.startsWith("/pos") ||
+    pathname.startsWith("/returns") || pathname.startsWith("/warranty") ||
+    pathname === "/settings/data";
+  const [warranties, setWarranties, hydrated] = useCollection<Warranty>("warranties", undefined, warrantiesActive);
 
   const getWarranty = (id: string) => warranties.find((w) => w.id === id);
 

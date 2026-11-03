@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useGL } from "@/lib/accounting/gl-store";
+import { api } from "@/lib/persist/api";
 import { useAccess } from "@/lib/settings/access";
 import { PeriodBar, usePeriod } from "@/components/accounting/period-bar";
 import { HistoryConversionCard } from "@/components/accounting/history-conversion-card";
@@ -10,39 +11,32 @@ import { KpiGrid, ReportHeader } from "@/components/reports/kpi";
 import { taka } from "@/lib/reports/format";
 
 export default function AccountingOverviewPage() {
-  const { coa, journals, layers, grni, hydrated } = useGL();
+  const { hydrated } = useGL();
   const { can } = useAccess();
   const period = usePeriod("this_month");
-  const report = useMemo(() => {
-    const accounts = new Map(coa.map((account) => [account.id, account]));
-    let revenue = 0;
-    let cogs = 0;
-    let expenses = 0;
-    for (const entry of journals) {
-      if (entry.status !== "posted" || entry.date < period.from || entry.date > period.to) continue;
-      for (const line of entry.lines) {
-        const type = accounts.get(line.accountId)?.type;
-        if (type === "revenue") revenue += line.credit - line.debit;
-        else if (type === "expense") {
-          const value = line.debit - line.credit;
-          if (line.accountCode?.startsWith("5")) cogs += value;
-          else expenses += value;
-        }
-      }
-    }
-    return {
-      revenue,
-      cogs,
-      grossProfit: revenue - cogs,
-      expenses,
-      netProfit: revenue - cogs - expenses,
-      inventory: layers.reduce((sum, layer) => sum + layer.remainingQty * layer.unitCost, 0),
-      openGrni: grni.filter((entry) => entry.status === "open" || entry.status === "partial").reduce((sum, entry) => sum + Math.max(0, entry.amount - entry.invoicedAmount), 0),
-      drafts: journals.filter((entry) => entry.status === "draft").length,
-    };
-  }, [coa, journals, layers, grni, period.from, period.to]);
+  const [report, setReport] = useState<{ revenue: number; cogs: number; grossProfit: number; expenses: number; netProfit: number; inventory: number; openGrni: number; drafts: number; recentJournals: { id: string; narration: string; date: string; entryNumber: string; totalDebit: number }[]; hasPosted: boolean } | null>(null);
+  const [reportError, setReportError] = useState("");
+  useEffect(() => {
+    let current = true;
+    api<{
+      summary: { revenue: number; cogs: number; expenses: number; inventory: number; openGrni: number; drafts: number };
+      recentJournals: { id: string; narration: string; date: string; entryNumber: string; totalDebit: number }[];
+      hasPosted: boolean;
+    }>("GET", `/api/accounting/overview?from=${period.from}&to=${period.to}`)
+      .then((result) => {
+        if (!current) return;
+        const { revenue, cogs, expenses } = result.summary;
+        setReport({ ...result.summary, revenue, cogs, expenses, grossProfit: revenue - cogs, netProfit: revenue - cogs - expenses, recentJournals: result.recentJournals, hasPosted: result.hasPosted });
+        setReportError("");
+      })
+      .catch((error) => { if (current) setReportError(error instanceof Error ? error.message : "Could not load accounting overview."); });
+    return () => { current = false; };
+  }, [period.from, period.to]);
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading accounting…</p>;
+  if (!hydrated || !report) {
+    if (reportError) return <p role="alert" className="rounded-xl border px-4 py-3 text-[13px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{reportError}</p>;
+    return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading accounting…</p>;
+  }
 
   const links = [
     ["Trial balance", "/accounting/trial-balance"], ["Inventory valuation", "/accounting/inventory"],
@@ -79,8 +73,8 @@ export default function AccountingOverviewPage() {
         <section className="card p-4">
           <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>Recent posted entries</h2>
           <div className="mt-2 divide-y" style={{ borderColor: "var(--border-soft)" }}>
-            {[...journals].filter((entry) => entry.status === "posted").sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 5).map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 py-2 text-[12px]"><span className="min-w-0"><span className="block truncate font-medium" style={{ color: "var(--text)" }}>{entry.narration}</span><span style={{ color: "var(--text-faint)" }}>{entry.date} · {entry.entryNumber}</span></span><b className="shrink-0 tabular-nums" style={{ color: "var(--text-muted)" }}>{taka(entry.totalDebit)}</b></div>)}
-            {!journals.some((entry) => entry.status === "posted") && <p className="py-4 text-[12px]" style={{ color: "var(--text-muted)" }}>No posted entries. Review the history conversion card above to start the general ledger.</p>}
+            {report.recentJournals.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 py-2 text-[12px]"><span className="min-w-0"><span className="block truncate font-medium" style={{ color: "var(--text)" }}>{entry.narration}</span><span style={{ color: "var(--text-faint)" }}>{entry.date} · {entry.entryNumber}</span></span><b className="shrink-0 tabular-nums" style={{ color: "var(--text-muted)" }}>{taka(entry.totalDebit)}</b></div>)}
+            {!report.hasPosted && <p className="py-4 text-[12px]" style={{ color: "var(--text-muted)" }}>No posted entries. Review the history conversion card above to start the general ledger.</p>}
           </div>
         </section>
       </div>

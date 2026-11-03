@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useWarranty } from "@/lib/warranty/store";
+import { api } from "@/lib/persist/api";
 import { daysLeft, effectiveStatus, WARRANTY_STATUS_LABELS } from "@/lib/warranty/utils";
 import type { Warranty, WarrantyClaim } from "@/lib/warranty/types";
 import { formatDay, inRange, parseDate, type DateTypeKey } from "@/lib/reports/dates";
@@ -25,8 +25,20 @@ const APPROVED = ["approved", "in_service", "replaced", "refunded"];
 export default function WarrantyReportPage() {
   const state = useReportFilters("warranty_start");
   const f = state.applied;
-  const { warranties, hydrated } = useWarranty();
+  const [warranties, setWarranties] = useState<Warranty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<Tab>("active");
+
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    api<{ warranties: Warranty[] }>("GET", `/api/reports/warranties?from=${encodeURIComponent(f.from)}&to=${encodeURIComponent(f.to)}&dateType=${f.dateType}`)
+      .then((result) => { if (current) { setWarranties(result.warranties); setLoadError(""); } })
+      .catch((error) => { if (current) setLoadError(error instanceof Error ? error.message : "Could not load the warranty report."); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [f.from, f.to, f.dateType]);
 
   const claimInRange = (c: WarrantyClaim) => inRange(new Date(c.submittedAt), f.from, f.to);
 
@@ -49,7 +61,8 @@ export default function WarrantyReportPage() {
   const active = useMemo(() => scope.filter((w) => ["active", "claimed"].includes(effectiveStatus(w))), [scope]);
   const expired = useMemo(() => scope.filter((w) => effectiveStatus(w) === "expired"), [scope]);
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loadError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{loadError}</p>;
 
   const expiringSoon = active.filter((w) => {
     const d = daysLeft(w);

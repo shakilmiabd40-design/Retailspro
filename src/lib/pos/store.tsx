@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useCollection } from "@/lib/persist/hooks";
 import { syncManager } from "@/lib/persist/sync";
 import { takeNumber } from "@/lib/persist/numbers";
@@ -188,6 +189,8 @@ function resolveLines(lines: CartLine[], products: Product[]): { lines: CartLine
 // ---- provider -----------------------------------------------------------------------------
 
 export function PosProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
+  const active = pathname.startsWith("/pos");
   const { products, sellStock, restoreStock, bulkUpdateStock } = useProducts();
   const { getOrder, createOrder, cancelOrder, discardOrder } = useOrders();
   const { createWarrantiesForOrder, discardForOrder, voidWarrantiesForOrderItem } = useWarranty();
@@ -195,10 +198,10 @@ export function PosProvider({ children }: { children: ReactNode }) {
   const { log } = useAudit();
   const { can, currentUser, currentRole, isSuperAdmin } = useAccess();
 
-  const [invoices, setInvoices, invoicesReady] = useCollection<PosInvoice>("pos_invoices");
-  const [sessions, setSessions, sessionsReady] = useCollection<PosSession>("pos_sessions");
-  const [returns, setReturns, returnsReady] = useCollection<PosReturn>("pos_returns");
-  const [held, setHeld, heldReady] = useCollection<HeldSale>("pos_held");
+  const [invoices, setInvoices, invoicesReady] = useCollection<PosInvoice>("pos_invoices", undefined, active);
+  const [sessions, setSessions, sessionsReady] = useCollection<PosSession>("pos_sessions", undefined, active);
+  const [returns, setReturns, returnsReady] = useCollection<PosReturn>("pos_returns", undefined, active);
+  const [held, setHeld, heldReady] = useCollection<HeldSale>("pos_held", undefined, active);
   const hydrated = invoicesReady && sessionsReady && returnsReady && heldReady;
 
   // ---- torn-write recovery ---------------------------------------------------------------

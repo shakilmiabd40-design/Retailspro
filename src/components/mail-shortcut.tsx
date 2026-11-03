@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Mail, Search, Send } from "lucide-react";
-import { useSuppliers } from "@/lib/suppliers/store";
+import { api } from "@/lib/persist/api";
+
+type SupplierMatch = { id: string; name: string; email: string | null };
 
 function isValidEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
@@ -16,9 +18,9 @@ function isValidEmail(v: string): boolean {
  * address) and hands off to the user's own mail app via `mailto:`.
  */
 export function MailShortcut() {
-  const { suppliers } = useSuppliers();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [suppliers, setSuppliers] = useState<SupplierMatch[]>([]);
   const [customEmail, setCustomEmail] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -43,15 +45,22 @@ export function MailShortcut() {
     }
   }, [open]);
 
-  const activeSuppliers = useMemo(() => suppliers.filter((s) => !s.archived), [suppliers]);
-  const withEmail = useMemo(
-    () =>
-      activeSuppliers
-        .filter((s) => s.email && s.email.trim())
-        .filter((s) => s.name.toLowerCase().includes(query.trim().toLowerCase()))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [activeSuppliers, query]
-  );
+  useEffect(() => {
+    let current = true;
+    const value = query.trim();
+    if (!open || value.length < 2) {
+      setSuppliers([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api<{ suppliers: SupplierMatch[] }>("GET", `/api/suppliers/search?q=${encodeURIComponent(value)}`)
+        .then((result) => { if (current) setSuppliers(result.suppliers); })
+        .catch(() => { if (current) setSuppliers([]); });
+    }, 200);
+    return () => { current = false; clearTimeout(timer); };
+  }, [open, query]);
+
+  const withEmail = suppliers.filter((s) => s.email?.trim());
 
   const compose = (email: string) => {
     window.location.href = `mailto:${email.trim()}`;
@@ -106,7 +115,7 @@ export function MailShortcut() {
           <div className="max-h-64 divide-y overflow-y-auto" style={{ borderColor: "var(--border-soft)" }}>
             {withEmail.length === 0 ? (
               <p className="px-4 py-6 text-center text-[12px]" style={{ color: "var(--text-muted)" }}>
-                {activeSuppliers.length === 0 ? "No suppliers yet." : "No match, or that supplier has no email on file."}
+                {query.trim().length < 2 ? "Type at least two characters to search suppliers." : "No match, or that supplier has no email on file."}
               </p>
             ) : (
               withEmail.map((s) => (

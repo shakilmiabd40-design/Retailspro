@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, RotateCcw } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { useGL } from "@/lib/accounting/gl-store";
+import { api } from "@/lib/persist/api";
 import { useAccess } from "@/lib/settings/access";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -16,18 +17,49 @@ export default function JournalEntriesPage() {
   const toast = useToast();
   const [expanded, setExpanded] = useState("");
   const [reversing, setReversing] = useState("");
-  const rows = useMemo(() => [...journals].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), [journals]);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<"all" | "draft" | "posted" | "reversed">("all");
+  const [pageData, setPageData] = useState<{ rows: ReturnType<typeof useGL>["journals"]; total: number; pages: number }>({ rows: [], total: 0, pages: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let current = true;
+    const params = new URLSearchParams({ page: String(page), limit: "25", status });
+    setLoading(true);
+    api<{ rows: { data: ReturnType<typeof useGL>["journals"][number] }[]; total: number; pages: number }>("GET", `/api/accounting/journals?${params}`)
+      .then((result) => {
+        if (!current) return;
+        if (result.pages > 0 && page > result.pages) { setPage(result.pages); return; }
+        setPageData({ rows: result.rows.map((row) => row.data), total: result.total, pages: result.pages });
+        setError("");
+      })
+      .catch((e) => { if (current) setError(e instanceof Error ? e.message : "Could not load journal entries."); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [page, status, journals]);
+  const rows = pageData.rows;
+  const totalPages = Math.max(1, pageData.pages);
   if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading journals…</p>;
 
   return (
     <div className="space-y-5">
       <ReportHeader title="Journal entries" description="Balanced entries from inventory, sales, receipts, and approved adjustments. Posted entries are immutable." />
       <nav className="flex flex-wrap gap-2 text-[12px]"><Link className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} href="/accounting/trial-balance">Trial balance</Link><Link className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} href="/accounting/inventory">Inventory valuation</Link><Link className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--brand)", color: "var(--brand)" }} href="/accounting/journals">Journal entries</Link></nav>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="text-[12px]" style={{ color: "var(--text-muted)" }}>Status <select value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1); }} className="ml-2 rounded-lg border px-2.5 py-1.5" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}><option value="all">All</option><option value="draft">Draft</option><option value="posted">Posted</option><option value="reversed">Reversed</option></select></label>
+        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{pageData.total} entries{loading ? " · loading" : ""}</span>
+      </div>
+      {error && <p role="alert" className="rounded-xl border px-4 py-3 text-[13px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>}
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[780px] text-[12.5px]"><thead><tr className="text-left text-[10.5px] uppercase" style={{ color: "var(--text-faint)" }}><th className="px-4 py-3">Entry / date</th><th className="px-4 py-3">Narration</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Debit = Credit</th><th className="px-4 py-3">Actions</th></tr></thead><tbody>
           {rows.map((entry) => <Fragment key={entry.id} entry={entry} expanded={expanded === entry.id} toggle={() => setExpanded(expanded === entry.id ? "" : entry.id)} canApprove={can("accounting", "approve")} onPost={() => { const r = postJournalEntry(entry.id); toast(r.ok ? "Journal posted" : r.error, r.ok ? "success" : "error"); }} onReverse={() => setReversing(entry.id)} />)}
         </tbody></table>
-        {!rows.length && <p className="p-8 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>No journal entries yet. Convert retained history to begin the FIFO and double-entry sub-ledgers.</p>}
+        {!rows.length && <p className="p-8 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>{loading ? "Loading entries…" : "No journal entries yet. Convert retained history to begin the FIFO and double-entry sub-ledgers."}</p>}
+      </div>
+      <div className="flex items-center justify-end gap-3 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+        <button disabled={page <= 1 || loading} onClick={() => setPage((n) => Math.max(1, n - 1))} className="rounded-lg border p-1.5 disabled:opacity-40" style={{ borderColor: "var(--border)" }} aria-label="Previous page"><ChevronLeft size={15} /></button>
+        <span>Page {Math.min(page, totalPages)} of {totalPages}</span>
+        <button disabled={page >= totalPages || loading} onClick={() => setPage((n) => Math.min(totalPages, n + 1))} className="rounded-lg border p-1.5 disabled:opacity-40" style={{ borderColor: "var(--border)" }} aria-label="Next page"><ChevronRight size={15} /></button>
       </div>
       <ConfirmDialog open={!!reversing} title="Post a reversal entry?" message="The posted original will remain unchanged. A new entry will reverse each debit and credit and point to the original." confirmLabel="Post reversal" onCancel={() => setReversing("")} onConfirm={() => {
         const entry = journals.find((j) => j.id === reversing);

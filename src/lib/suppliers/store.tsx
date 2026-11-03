@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import type { Supplier } from "./types";
 import { useCollection } from "@/lib/persist/hooks";
 
@@ -17,7 +18,12 @@ interface SuppliersContextValue {
 const SuppliersContext = createContext<SuppliersContextValue | null>(null);
 
 export function SuppliersProvider({ children }: { children: ReactNode }) {
-  const [suppliers, setSuppliers, hydrated] = useCollection<Supplier>("suppliers");
+  const pathname = usePathname();
+  const enabled = pathname.startsWith("/suppliers") || pathname.startsWith("/purchase-orders") ||
+    pathname.startsWith("/reports") || pathname.startsWith("/accounting/grni") ||
+    pathname.startsWith("/returns/new-supplier") || pathname.startsWith("/settings/purchase") ||
+    pathname.startsWith("/settings/data");
+  const [suppliers, setSuppliers, hydrated] = useCollection<Supplier>("suppliers", undefined, enabled);
 
   const getSupplier = (id: string) => suppliers.find((s) => s.id === id);
   const addSupplier = (s: Supplier) => setSuppliers((prev) => [s, ...prev]);

@@ -8,12 +8,12 @@ import { syncManager, type CollectionAdapter, type DocumentAdapter, type Row } f
  * Drop-in replacement for `useState(seed)` + "load from localStorage" + "save to localStorage" in a store:
  * the same setter, but the list lives in the database.
  */
-export function useCollection<T extends { id: string }>(name: CollectionName, normalize?: (item: T) => T): [T[], Dispatch<SetStateAction<T[]>>, boolean] {
+export function useCollection<T extends { id: string }>(name: CollectionName, normalize?: (item: T) => T, enabled = true): [T[], Dispatch<SetStateAction<T[]>>, boolean] {
   const [items, setItems] = useState<T[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const itemsRef = useRef<T[]>(items);
   const norm = useRef(normalize);
-  const state = useRef({ synced: new Map<string, { json: string; version: number }>(), loaded: false });
+  const state = useRef({ synced: new Map<string, { json: string; version: number }>(), loaded: false, registered: false });
   const cache = useRef(new WeakMap<object, string>());
 
   useEffect(() => {
@@ -23,6 +23,21 @@ export function useCollection<T extends { id: string }>(name: CollectionName, no
 
   useEffect(() => {
     const s = state.current;
+    // Once activated, keep the adapter and its complete snapshot for the lifetime of
+    // the app shell. This avoids dropping unsaved writes when route-scoped stores turn
+    // off during navigation, and avoids reloading a collection on every return visit.
+    if (s.registered) return;
+    if (!enabled) {
+      s.loaded = false;
+      s.synced.clear();
+      itemsRef.current = [];
+      setItems([]);
+      setHydrated(true);
+      return;
+    }
+    // A collection may have been intentionally unloaded on the previous route. Do not
+    // expose the previous route's hydrated flag while the fresh snapshot is in flight.
+    setHydrated(false);
     const jsonOf = (item: T) => {
       let j = cache.current.get(item);
       if (j === undefined) {
@@ -86,10 +101,14 @@ export function useCollection<T extends { id: string }>(name: CollectionName, no
     };
 
     syncManager.register(adapter);
-    return () => {
-      syncManager.unregister(name);
-      s.loaded = false;
-    };
+    s.registered = true;
+  }, [name, enabled]);
+
+  useEffect(() => () => {
+    const s = state.current;
+    if (s.registered) syncManager.unregister(name);
+    s.registered = false;
+    s.loaded = false;
   }, [name]);
 
   return [items, setItems, hydrated];

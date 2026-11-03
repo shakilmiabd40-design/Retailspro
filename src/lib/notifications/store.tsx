@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { api } from "@/lib/persist/api";
 import { useProducts } from "@/lib/products/store";
 import { usePurchaseOrders } from "@/lib/purchase-orders/store";
 import type { PurchaseOrder } from "@/lib/purchase-orders/types";
@@ -86,6 +88,8 @@ function clampSettings(s: NotificationSettings): NotificationSettings {
 }
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
+  const dashboard = pathname === "/";
   const { products, hydrated: productsReady } = useProducts();
   const { purchaseOrders, hydrated: posReady } = usePurchaseOrders();
   // Alerts are derived from stock levels, so last-write-wins is fine (no version conflicts to resolve).
@@ -96,9 +100,31 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   });
   const [orderNotificationData, setOrderNotificationData, orderNotificationsLoaded] = useDocument<OrderNotificationsData>("order_notifications", EMPTY_ORDER_NOTIFICATIONS);
   const loaded = dataLoaded && settingsLoaded && orderNotificationsLoaded;
-
-  const ready = loaded && productsReady && posReady;
-  const snapshots = useMemo(() => (ready ? snapshotSkus(products, purchaseOrders) : []), [ready, products, purchaseOrders]);
+  const [remoteSnapshots, setRemoteSnapshots] = useState<SkuSnapshot[] | null>(null);
+  useEffect(() => {
+    if (!dashboard) { setRemoteSnapshots(null); return; }
+    let current = true;
+    let inFlight = false;
+    let revision = "";
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const params = new URLSearchParams();
+        if (revision) params.set("revision", revision);
+        const result = await api<{ snapshots?: SkuSnapshot[]; revision: string; unchanged?: boolean }>("GET", `/api/notifications/snapshots${params.size ? `?${params}` : ""}`);
+        if (!current) return;
+        revision = result.revision;
+        if (!result.unchanged) setRemoteSnapshots(result.snapshots ?? []);
+      } catch { /* Keep the last good snapshot; a transient read failure must not clear alerts. */ }
+      finally { inFlight = false; }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 60_000);
+    return () => { current = false; clearInterval(timer); };
+  }, [dashboard]);
+  const ready = loaded && (dashboard ? remoteSnapshots !== null : productsReady && posReady);
+  const snapshots = useMemo(() => dashboard ? remoteSnapshots ?? [] : (ready ? snapshotSkus(products, purchaseOrders) : []), [dashboard, remoteSnapshots, ready, products, purchaseOrders]);
 
   // Newly-opened Replenish / Critical / Out of stock notifications queue up here, then get emailed by the
   // effect right below. A ref (not state) so queuing never itself triggers a re-render or another sync pass.

@@ -3,13 +3,11 @@
 import { useEffect, useRef } from "react";
 import { useToast } from "@/components/toast";
 import { api } from "@/lib/persist/api";
-import { useOrders } from "@/lib/orders/store";
 import { useAccess } from "@/lib/settings/access";
 import { useSettings } from "@/lib/settings/store";
 
 /** Polls open Steadfast consignments while the signed-in app is in use, as a fallback for missed webhooks. */
 export function SteadfastAutoSync() {
-  const { orders } = useOrders();
   const { can } = useAccess();
   const { settings } = useSettings();
   const showToast = useToast();
@@ -18,8 +16,8 @@ export function SteadfastAutoSync() {
   const enabled = settings.courier.steadfast?.enabled ?? false;
   const canViewOrders = can("orders", "view");
   const couriers = settings.courier.couriers;
-  const latest = useRef({ orders, couriers, showToast });
-  latest.current = { orders, couriers, showToast };
+  const latest = useRef({ couriers, showToast });
+  latest.current = { couriers, showToast };
 
   useEffect(() => {
     if (!enabled || !canViewOrders) return;
@@ -29,14 +27,18 @@ export function SteadfastAutoSync() {
       if (document.visibilityState === "hidden") return;
       if (checksMade.current >= 5) return;
       checksMade.current += 1;
-      const { orders: currentOrders, couriers: currentCouriers, showToast: toast } = latest.current;
-      const candidates = currentOrders.filter((o) => {
-        if (o.status !== "processing" || !o.courier.trackingId.trim()) return false;
-        const company = o.courier.company.trim().toLowerCase();
-        return currentCouriers.some((c) => c.status === "active" && (c.id === "cr-steadfast" || c.name.trim().toLowerCase() === "steadfast") && c.name.trim().toLowerCase() === company);
-      });
+      const { couriers: currentCouriers, showToast: toast } = latest.current;
+      let candidates: { id: string; orderNumber: string; company: string }[];
+      try {
+        ({ rows: candidates } = await api<{ rows: { id: string; orderNumber: string; company: string }[] }>("GET", "/api/courier/steadfast/open"));
+      } catch {
+        return;
+      }
+      const steadfast = currentCouriers.some((c) => c.status === "active" && (c.id === "cr-steadfast" || c.name.trim().toLowerCase() === "steadfast"));
+      if (!steadfast) return;
 
       for (const order of candidates) {
+        if (order.company.trim().toLowerCase() !== "steadfast") continue;
         if (!active) return;
         if (inFlight.current.has(order.id)) continue;
         inFlight.current.add(order.id);

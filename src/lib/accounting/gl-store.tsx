@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useCollection, useDocument } from "@/lib/persist/hooks";
 import { useAccess } from "@/lib/settings/access";
 import { useAudit } from "@/lib/settings/audit";
@@ -55,13 +56,15 @@ function nextNumber(prefix: string, existing: JournalEntry[]) {
 }
 
 export function GLProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
+  const journalsPage = pathname === "/accounting/journals";
   const [coa, setCoa, coaReady] = useCollection<ChartOfAccount>("chart_of_accounts");
-  const [journals, setJournals, journalsReady] = useCollection<JournalEntry>("journal_entries");
-  const [movements, setMovements, movementsReady] = useCollection<InventoryMovement>("inventory_movements");
-  const [layers, setLayers, layersReady] = useCollection<InventoryCostLayer>("inventory_cost_layers");
-  const [adjustments, setAdjustments, adjustmentsReady] = useCollection<StockAdjustment>("stock_adjustments");
-  const [grni, setGrni, grniReady] = useCollection<GrniEntry>("grni");
-  const [apInvoices, setApInvoices, apReady] = useCollection<ApInvoice>("ap_invoices");
+  const [journals, setJournals, journalsReady] = useCollection<JournalEntry>("journal_entries", undefined, journalsPage);
+  const [movements, setMovements, movementsReady] = useCollection<InventoryMovement>("inventory_movements", undefined, false);
+  const [layers, setLayers, layersReady] = useCollection<InventoryCostLayer>("inventory_cost_layers", undefined, false);
+  const [adjustments, setAdjustments, adjustmentsReady] = useCollection<StockAdjustment>("stock_adjustments", undefined, false);
+  const [grni, setGrni, grniReady] = useCollection<GrniEntry>("grni", undefined, false);
+  const [apInvoices, setApInvoices, apReady] = useCollection<ApInvoice>("ap_invoices", undefined, false);
   const [periods, setPeriods, periodsReady] = useCollection<AccountingPeriod>("accounting_periods");
   const [config, setConfig, configReady] = useDocument<AccountingConfig>("accounting_config", DEFAULT_ACCOUNTING_CONFIG);
   const { can } = useAccess();

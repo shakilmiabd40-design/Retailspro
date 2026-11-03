@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useSettings } from "@/lib/settings/store";
 import { useProducts } from "@/lib/products/store";
 import type { StockUpdate } from "@/lib/products/store";
@@ -37,9 +38,10 @@ interface PurchaseOrdersContextValue {
 const PurchaseOrdersContext = createContext<PurchaseOrdersContextValue | null>(null);
 
 export function PurchaseOrdersProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
   const { bulkUpdateStock } = useProducts();
   const { settings } = useSettings();
-  const [purchaseOrders, setPurchaseOrders, hydrated] = useCollection<PurchaseOrder>("purchase_orders");
+  const [purchaseOrders, setPurchaseOrders, hydrated] = useCollection<PurchaseOrder>("purchase_orders", undefined, pathname !== "/");
 
   const getPo = (id: string) => purchaseOrders.find((p) => p.id === id);
 

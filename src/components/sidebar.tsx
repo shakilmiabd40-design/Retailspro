@@ -48,6 +48,8 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { X } from "lucide-react";
 import { useOrders } from "@/lib/orders/store";
+import { ordersCollectionActive } from "@/lib/orders/routes";
+import { api } from "@/lib/persist/api";
 import { useNotifications } from "@/lib/notifications/store";
 import { useSettings } from "@/lib/settings/store";
 import { useAccess } from "@/lib/settings/access";
@@ -69,10 +71,36 @@ type NavItem = {
 export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
   const { statusCounts } = useOrders();
+  const [serverOrderCounts, setServerOrderCounts] = useState<Record<string, number> | null>(null);
   const { unreadCount } = useNotifications();
   const { settings } = useSettings();
   const { can } = useAccess();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pathname && ordersCollectionActive(pathname)) {
+      setServerOrderCounts(null);
+      return;
+    }
+    let current = true;
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const result = await api<{ counts: Record<string, number> }>("GET", "/api/orders/counts");
+        if (current) setServerOrderCounts({ ...result.counts, all: result.counts.total ?? 0 });
+      } catch {
+        if (current) setServerOrderCounts(null);
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => { current = false; clearInterval(timer); };
+  }, [pathname]);
+  const orderCounts = serverOrderCounts ?? statusCounts;
 
   useEffect(() => {
     if (pathname?.startsWith("/pos")) setOpenMenu("POS");
@@ -139,14 +167,14 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
       matchPrefix: "/orders",
       perm: { module: "orders", action: "view" },
       children: [
-        { label: "All Orders", href: "/orders", icon: ListOrdered, count: statusCounts.all },
-        { label: "Pending", href: "/orders?status=pending", icon: Clock, count: statusCounts.pending },
-        { label: "Processing", href: "/orders?status=processing", icon: RefreshCcw, count: statusCounts.processing },
-        { label: "In Transit", href: "/orders?status=in_transit", icon: Truck, count: statusCounts.in_transit },
-        { label: "Delivered", href: "/orders?status=delivered", icon: PackageCheck, count: statusCounts.delivered },
-        { label: "Partial Delivered", href: "/orders?status=partial_delivered", icon: RotateCcw, count: statusCounts.partial_delivered },
-        { label: "Refuse Return", href: "/orders?status=refuse_return", icon: PackageX, count: statusCounts.refuse_return },
-        { label: "Cancelled", href: "/orders?status=cancelled", icon: Ban, count: statusCounts.cancelled },
+        { label: "All Orders", href: "/orders", icon: ListOrdered, count: orderCounts.all ?? 0 },
+        { label: "Pending", href: "/orders?status=pending", icon: Clock, count: orderCounts.pending ?? 0 },
+        { label: "Processing", href: "/orders?status=processing", icon: RefreshCcw, count: orderCounts.processing ?? 0 },
+        { label: "In Transit", href: "/orders?status=in_transit", icon: Truck, count: orderCounts.in_transit ?? 0 },
+        { label: "Delivered", href: "/orders?status=delivered", icon: PackageCheck, count: orderCounts.delivered ?? 0 },
+        { label: "Partial Delivered", href: "/orders?status=partial_delivered", icon: RotateCcw, count: orderCounts.partial_delivered ?? 0 },
+        { label: "Refuse Return", href: "/orders?status=refuse_return", icon: PackageX, count: orderCounts.refuse_return ?? 0 },
+        { label: "Cancelled", href: "/orders?status=cancelled", icon: Ban, count: orderCounts.cancelled ?? 0 },
       ],
     },
     {

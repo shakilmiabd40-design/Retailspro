@@ -1,20 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { useGL } from "@/lib/accounting/gl-store";
+import { api } from "@/lib/persist/api";
 import { ReportHeader } from "@/components/reports/kpi";
 import { GhostButton } from "@/components/settings/ui";
 import { downloadCsv } from "@/lib/reports/export";
 import { taka } from "@/lib/reports/format";
 
 export default function TrialBalancePage() {
-  const { coa, journals, hydrated, trialBalance } = useGL();
+  const { coa, hydrated } = useGL();
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
-  const report = useMemo(() => trialBalance(asOf), [trialBalance, asOf, journals, coa]);
+  const [balances, setBalances] = useState<{ accountId: string; debit: number; credit: number }[]>([]);
+  const [loadingReport, setLoadingReport] = useState(true);
+  const [reportError, setReportError] = useState("");
+  useEffect(() => {
+    let current = true;
+    setLoadingReport(true);
+    api<{ rows: { accountId: string; debit: number; credit: number }[] }>("GET", `/api/accounting/report?kind=balances&from=0001-01-01&to=${asOf}`)
+      .then((result) => { if (current) { setBalances(result.rows); setReportError(""); } })
+      .catch((error) => { if (current) setReportError(error instanceof Error ? error.message : "Could not load trial balance."); })
+      .finally(() => { if (current) setLoadingReport(false); });
+    return () => { current = false; };
+  }, [asOf]);
+  const report = useMemo(() => {
+    const byId = new Map(balances.map((row) => [row.accountId, row]));
+    const lines = coa.filter((account) => !account.archived && byId.has(account.id)).map((account) => {
+      const row = byId.get(account.id)!;
+      return { account, debit: Math.round(row.debit * 100) / 100, credit: Math.round(row.credit * 100) / 100 };
+    }).filter((row) => row.debit !== 0 || row.credit !== 0);
+    return { lines, totalDebit: Math.round(lines.reduce((sum, row) => sum + row.debit, 0) * 100) / 100, totalCredit: Math.round(lines.reduce((sum, row) => sum + row.credit, 0) * 100) / 100 };
+  }, [balances, coa]);
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading trial balance…</p>;
+  if (!hydrated || loadingReport) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading trial balance…</p>;
   const balanced = Math.abs(report.totalDebit - report.totalCredit) < 0.01;
 
   return (
@@ -37,6 +57,7 @@ export default function TrialBalancePage() {
         <Link className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} href="/accounting/inventory">Inventory valuation</Link>
         <Link className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} href="/accounting/journals">Journal entries</Link>
       </nav>
+      {reportError && <p role="alert" className="rounded-xl border px-4 py-3 text-[13px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{reportError}</p>}
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[620px] text-[13px]">
           <thead><tr className="border-b text-left text-[11.5px] uppercase" style={{ borderColor: "var(--border-soft)", color: "var(--text-faint)" }}><th className="px-4 py-3">Code</th><th className="px-4 py-3">Account</th><th className="px-4 py-3">Type</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th></tr></thead>

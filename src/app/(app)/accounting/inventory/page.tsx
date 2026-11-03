@@ -1,39 +1,52 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useGL } from "@/lib/accounting/gl-store";
+import { api } from "@/lib/persist/api";
+import type { InventoryMovement } from "@/lib/accounting/gl-types";
 import { useProducts } from "@/lib/products/store";
 import { taka } from "@/lib/reports/format";
 import { KpiGrid, ReportHeader } from "@/components/reports/kpi";
 
+type InventoryReport = { layers: { productId: string; variantId: string; qty: number; value: number }[]; movements: InventoryMovement[]; glValue: number };
+
 export default function InventoryAccountingPage() {
-  const { layers, movements, hydrated, trialBalance } = useGL();
+  const { hydrated } = useGL();
   const { products, hydrated: productsReady } = useProducts();
+  const [report, setReport] = useState<InventoryReport | null>(null);
+  const [reportError, setReportError] = useState("");
+  useEffect(() => {
+    let current = true;
+    const refresh = async () => {
+      try {
+        const result = await api<InventoryReport>("GET", "/api/accounting/inventory");
+        if (current) { setReport(result); setReportError(""); }
+      } catch (error) {
+        if (current) setReportError(error instanceof Error ? error.message : "Could not load inventory valuation.");
+      }
+    };
+    void refresh();
+    const interval = setInterval(() => void refresh(), 30_000);
+    return () => { current = false; clearInterval(interval); };
+  }, []);
   const rows = useMemo(() => {
     const productById = new Map(products.map((p) => [p.id, p]));
-    const grouped = new Map<string, { productId: string; variantId: string; qty: number; value: number }>();
-    for (const layer of layers) {
-      if (layer.remainingQty <= 0) continue;
-      const key = `${layer.productId}:${layer.variantId}`;
-      const row = grouped.get(key) ?? { productId: layer.productId, variantId: layer.variantId, qty: 0, value: 0 };
-      row.qty += layer.remainingQty;
-      row.value += layer.remainingQty * layer.unitCost;
-      grouped.set(key, row);
-    }
-    return [...grouped.values()].map((r) => {
+    return (report?.layers ?? []).map((r) => {
       const product = productById.get(r.productId);
       const variant = product?.variants.find((v) => v.id === r.variantId);
       return { ...r, name: product?.name ?? r.productId, sku: variant?.sku ?? "—", size: variant?.size ?? "—", color: variant?.color ?? "—" };
     }).sort((a, b) => a.name.localeCompare(b.name) || a.size.localeCompare(b.size));
-  }, [layers, products]);
+  }, [report, products]);
 
-  if (!hydrated || !productsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading FIFO inventory…</p>;
+  if (!hydrated || !productsReady || !report) {
+    if (reportError) return <p role="alert" className="rounded-xl border px-4 py-3 text-[13px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{reportError}</p>;
+    return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading FIFO inventory…</p>;
+  }
   const stockValue = rows.reduce((s, r) => s + r.value, 0);
-  const inventoryAccount = trialBalance().lines.find((r) => r.account.code === "1200");
-  const glValue = (inventoryAccount?.debit ?? 0) - (inventoryAccount?.credit ?? 0);
+  const glValue = report.glValue;
   const difference = stockValue - glValue;
-  const recent = [...movements].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+  const recent = report.movements;
 
   return (
     <div className="space-y-5">

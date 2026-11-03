@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useCollection } from "@/lib/persist/hooks";
 import { useAccess } from "@/lib/settings/access";
 import { useAudit } from "@/lib/settings/audit";
@@ -89,8 +90,10 @@ function clean(input: EntryInput): Omit<LedgerEntry, "id" | "createdAt"> {
 }
 
 export function AccountingProvider({ children }: { children: ReactNode }) {
-  const [accounts, setAccounts, accountsReady] = useCollection<Account>("accounts");
-  const [entries, setEntries, entriesReady] = useCollection<LedgerEntry>("ledger");
+  const pathname = usePathname() ?? "";
+  const active = pathname === "/accounting/accounts" || pathname === "/accounting/expenses" || pathname === "/accounting/ledger";
+  const [accounts, setAccounts, accountsReady] = useCollection<Account>("accounts", undefined, active);
+  const [entries, setEntries, entriesReady] = useCollection<LedgerEntry>("ledger", undefined, active);
   const { can } = useAccess();
   const { log } = useAudit();
   const { user } = useAuth();

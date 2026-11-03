@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import type { Product, StockUpdateMode } from "./types";
 import { useCollection, useDocument } from "@/lib/persist/hooks";
 import { applyStockMode } from "./utils";
@@ -60,11 +61,12 @@ interface ProductsContextValue {
 const ProductsContext = createContext<ProductsContextValue | null>(null);
 
 export function ProductsProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
   const [products, setProducts, productsReady] = useCollection<Product>("products", (p) => ({
     ...p,
     // Older records may predate the `reserved` field on variants.
     variants: p.variants.map((v) => ({ ...v, reserved: v.reserved ?? 0 })),
-  }));
+  }), pathname !== "/");
   const [catalog, setCatalog, catalogReady] = useDocument<Catalog>("catalog", DEFAULT_CATALOG);
   const hydrated = productsReady && catalogReady;
 

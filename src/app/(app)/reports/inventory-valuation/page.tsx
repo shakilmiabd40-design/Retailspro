@@ -1,9 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
-import { deliveredDate, matchesProductFilters, productMeta } from "@/lib/reports/orders";
+import { matchesProductFilters, productMeta } from "@/lib/reports/orders";
 import { formatDay, type DateTypeKey } from "@/lib/reports/dates";
 import { num, sum, taka, ymd } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
@@ -11,6 +10,7 @@ import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { RankBars } from "@/components/reports/charts";
+import { useLastSoldDates } from "@/lib/reports/use-last-sold";
 
 interface ValueRow {
   variantId: string;
@@ -33,22 +33,13 @@ export default function InventoryValuationReportPage() {
   const state = useReportFilters("order_created");
   const f = state.applied;
   const { products, hydrated } = useProducts();
-  const { orders, hydrated: ordersReady } = useOrders();
+  const { lastSold, loading: salesLoading, error: salesError } = useLastSoldDates();
   const [deadDays, setDeadDays] = useState(60);
   const [deadOnly, setDeadOnly] = useState(false);
   const [now] = useState(() => Date.now());
 
   const all = useMemo<ValueRow[]>(() => {
     const meta = productMeta(products);
-    const lastSold = new Map<string, Date>();
-    for (const o of orders) {
-      const d = deliveredDate(o);
-      if (!d) continue;
-      for (const i of o.items) {
-        const cur = lastSold.get(i.variantId);
-        if (!cur || d > cur) lastSold.set(i.variantId, d);
-      }
-    }
     const cutoff = now - Math.max(1, deadDays) * DAY_MS;
     const out: ValueRow[] = [];
     for (const p of products) {
@@ -70,7 +61,7 @@ export default function InventoryValuationReportPage() {
       }
     }
     return out.sort((a, b) => b.value - a.value);
-  }, [products, orders, f, deadDays, now]);
+  }, [products, lastSold, f, deadDays, now]);
 
   const rows = useMemo(() => all.filter((r) => !deadOnly || r.dead), [all, deadOnly]);
 
@@ -80,7 +71,8 @@ export default function InventoryValuationReportPage() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value: Math.round(value) }));
   }, [all]);
 
-  if (!hydrated || !ordersReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (!hydrated || salesLoading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (salesError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{salesError}</p>;
 
   const dead = all.filter((r) => r.dead);
 

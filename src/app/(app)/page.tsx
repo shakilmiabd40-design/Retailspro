@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Calendar, RotateCcw } from "lucide-react";
 import { OrdersKpiCard } from "@/components/cards/orders-kpi-card";
 import { CustomersCard } from "@/components/cards/customers-card";
@@ -10,11 +10,9 @@ import { OrdersChartCard } from "@/components/cards/orders-chart-card";
 import { TopDistrictsCard } from "@/components/cards/top-districts-card";
 import { ProductSalesTable } from "@/components/cards/product-sales-table";
 import { RecentOrdersList } from "@/components/cards/recent-orders-list";
-import { buildDashboard, type DashboardDateRange } from "@/lib/dashboard";
-import { useOrders } from "@/lib/orders/store";
-import { useProducts } from "@/lib/products/store";
-import { useAccounting } from "@/lib/accounting/store";
-import { usePos } from "@/lib/pos/store";
+import type { DashboardData } from "@/lib/types";
+import type { DashboardDateRange } from "@/lib/dashboard";
+import { api } from "@/lib/persist/api";
 import { useAccess } from "@/lib/settings/access";
 import { FinanceKpis } from "@/components/cards/finance-kpis";
 import { PRESETS, presetRange, type PresetKey } from "@/lib/reports/dates";
@@ -23,10 +21,6 @@ const inputStyle = { borderColor: "var(--border)", background: "var(--surface)",
 const inputClass = "focus-ring rounded-xl border px-3 py-1.5 text-[12.5px]";
 
 export default function DashboardPage() {
-  const { orders, hydrated: ordersReady } = useOrders();
-  const { products, hydrated: productsReady } = useProducts();
-  const { entries } = useAccounting();
-  const { invoices } = usePos();
   const { can } = useAccess();
 
   // Dashboard Date Filter State
@@ -39,10 +33,29 @@ export default function DashboardPage() {
     return { from, to, label };
   }, [from, to, preset]);
 
-  const data = useMemo(
-    () => buildDashboard(orders, products, new Date(), entries, invoices, dateRange),
-    [orders, products, entries, invoices, dateRange]
-  );
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [reportError, setReportError] = useState("");
+  useEffect(() => {
+    let current = true;
+    let inFlight = false;
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      const params = new URLSearchParams({ from, to, label: dateRange.label ?? "" });
+      try {
+        const result = await api<{ data: DashboardData }>("GET", `/api/dashboard?${params.toString()}`);
+        if (current) { setData(result.data); setReportError(""); }
+      } catch (error) {
+        if (current) setReportError(error instanceof Error ? error.message : "Could not load dashboard reports.");
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refresh();
+    // Keep the report fresh when courier syncs or another staff member updates records.
+    const interval = setInterval(() => void refresh(), 30_000);
+    return () => { current = false; clearInterval(interval); };
+  }, [from, to, dateRange.label]);
 
   function handlePreset(p: PresetKey) {
     setPreset(p);
@@ -55,7 +68,8 @@ export default function DashboardPage() {
     handlePreset("last30");
   }
 
-  if (!ordersReady || !productsReady) {
+  if (!data) {
+    if (reportError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{reportError}</p>;
     return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
   }
 
@@ -133,6 +147,7 @@ export default function DashboardPage() {
         <TopCategoriesCard data={data.topCategories} />
       </div>
 
+      {reportError && <p className="text-[12px]" role="status" style={{ color: "var(--red)" }}>{reportError}</p>}
       {can("accounting", "view") && <FinanceKpis from={from} to={to} label={dateRange.label} />}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">

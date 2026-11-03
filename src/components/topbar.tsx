@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, Search, X, Package, ShoppingCart, Truck } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
@@ -8,20 +8,17 @@ import { NotificationBell } from "./notifications/notification-bell";
 import { UserMenu } from "./user-menu";
 import { SyncStatus } from "./sync-status";
 import { MailShortcut } from "./mail-shortcut";
-import { useProducts } from "@/lib/products/store";
-import { useOrders } from "@/lib/orders/store";
-import { useSuppliers } from "@/lib/suppliers/store";
-
-const MAX_PER_GROUP = 5;
+import { api } from "@/lib/persist/api";
 
 export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const router = useRouter();
-  const { products } = useProducts();
-  const { orders } = useOrders();
-  const { suppliers } = useSuppliers();
-
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<{
+    products: { id: string; name: string; sku: string }[];
+    orders: { id: string; orderNumber: string; customerName: string; phone: string }[];
+    suppliers: { id: string; name: string; phone: string }[];
+  }>({ products: [], orders: [], suppliers: [] });
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,25 +49,21 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   }, []);
 
   const q = query.trim().toLowerCase();
+  const productResults = results.products;
+  const orderResults = results.orders;
+  const supplierResults = results.suppliers;
 
-  const productResults = useMemo(() => {
-    if (!q) return [];
-    return products
-      .filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q))
-      .slice(0, MAX_PER_GROUP);
-  }, [q, products]);
-
-  const orderResults = useMemo(() => {
-    if (!q) return [];
-    return orders
-      .filter((o) => o.orderNumber.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q) || o.phone.includes(query.trim()))
-      .slice(0, MAX_PER_GROUP);
-  }, [q, orders, query]);
-
-  const supplierResults = useMemo(() => {
-    if (!q) return [];
-    return suppliers.filter((s) => s.name.toLowerCase().includes(q) || (s.phone ?? "").includes(query.trim())).slice(0, MAX_PER_GROUP);
-  }, [q, suppliers, query]);
+  useEffect(() => {
+    if (q.length < 2) { setResults({ products: [], orders: [], suppliers: [] }); return; }
+    setResults({ products: [], orders: [], suppliers: [] });
+    let current = true;
+    const timer = setTimeout(() => {
+      api<typeof results>("GET", `/api/search?q=${encodeURIComponent(query.trim())}`)
+        .then((next) => { if (current) setResults(next); })
+        .catch(() => { if (current) setResults({ products: [], orders: [], suppliers: [] }); });
+    }, 180);
+    return () => { current = false; clearTimeout(timer); };
+  }, [q, query]);
 
   const hasResults = productResults.length > 0 || orderResults.length > 0 || supplierResults.length > 0;
 

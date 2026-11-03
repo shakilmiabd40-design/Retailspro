@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { useOrders } from "@/lib/orders/store";
 import { ORDER_STATUS_LABELS } from "@/lib/orders/utils";
 import { ALL_ORDER_STATUSES, filterOrders, orderDateFor } from "@/lib/reports/orders";
 import { formatDay, type DateTypeKey } from "@/lib/reports/dates";
@@ -15,13 +14,14 @@ import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader } from "@/components/reports/kpi";
 import { DonutChart, STATUS_CHART_COLORS, TrendChart } from "@/components/reports/charts";
 import { OrderStatusBadge } from "@/components/orders/status-badge";
+import { useReportOrders } from "@/lib/reports/use-orders";
 
 const DATE_TYPES: DateTypeKey[] = ["order_created", "dispatch", "final_status"];
 
 export default function OrderStatusReportPage() {
   const state = useReportFilters("order_created", "daily");
   const f = state.applied;
-  const { orders, hydrated } = useOrders();
+  const { orders, loading, error } = useReportOrders(f.from, f.to, f.dateType);
 
   // Counts and charts ignore the status filter so the whole distribution stays visible; the table honours it.
   const base = useMemo(() => filterOrders(orders, { ...f, status: "all" }), [orders, f]);
@@ -42,7 +42,8 @@ export default function OrderStatusReportPage() {
     return trendBuckets(base, (o) => orderDateFor(o, f.dateType), f, measures);
   }, [base, f]);
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (error) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>;
 
   const columns: Column<Order>[] = [
     {

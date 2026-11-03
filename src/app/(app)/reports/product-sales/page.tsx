@@ -1,9 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useOrders } from "@/lib/orders/store";
 import { useProducts } from "@/lib/products/store";
-import { useReturns } from "@/lib/returns/store";
 import { filterOrders, matchesProductFilters, productMeta } from "@/lib/reports/orders";
 import { inRange, type DateTypeKey } from "@/lib/reports/dates";
 import { num, sum, taka } from "@/lib/reports/format";
@@ -12,6 +10,8 @@ import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { RankBars } from "@/components/reports/charts";
+import { useReportOrders } from "@/lib/reports/use-orders";
+import { useReportReturns } from "@/lib/reports/use-returns";
 
 const DATE_TYPES: DateTypeKey[] = ["delivered", "order_created", "final_status"];
 
@@ -31,9 +31,9 @@ interface VariantSales {
 export default function ProductSalesReportPage() {
   const state = useReportFilters("delivered");
   const f = state.applied;
-  const { orders, hydrated } = useOrders();
+  const { orders, loading: ordersLoading, error: ordersError } = useReportOrders(f.from, f.to, f.dateType);
   const { products, hydrated: productsReady } = useProducts();
-  const { returns, hydrated: returnsReady } = useReturns();
+  const { returns, loading: returnsLoading, error: returnsError } = useReportReturns(f.from, f.to, "customer");
 
   const rows = useMemo<VariantSales[]>(() => {
     const meta = productMeta(products);
@@ -74,7 +74,8 @@ export default function ProductSalesReportPage() {
     return [...m.values()].sort((a, b) => b.value - a.value).slice(0, 6);
   }, [rows]);
 
-  if (!hydrated || !productsReady || !returnsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (ordersLoading || returnsLoading || !productsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (ordersError || returnsError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{ordersError || returnsError}</p>;
 
   const qty = sum(rows, (r) => r.qty);
   const revenue = sum(rows, (r) => r.revenue);

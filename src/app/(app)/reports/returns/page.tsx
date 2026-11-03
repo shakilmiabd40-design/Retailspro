@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useReturns } from "@/lib/returns/store";
+import { api } from "@/lib/persist/api";
+import type { ReturnRecord } from "@/lib/returns/types";
 import { RETURN_STATUS_LABELS } from "@/lib/returns/utils";
 import type { ReturnType } from "@/lib/returns/types";
 import { formatDay, inRange, type DateTypeKey } from "@/lib/reports/dates";
@@ -36,8 +37,20 @@ const requestedAt = (createdAt: string) => new Date(createdAt);
 export default function ReturnsReportPage() {
   const state = useReportFilters("return_received");
   const f = state.applied;
-  const { returns, hydrated } = useReturns();
   const [tab, setTab] = useState<ReturnType>("customer");
+  const [returns, setReturns] = useState<ReturnRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    api<{ returns: ReturnRecord[] }>("GET", `/api/reports/returns?from=${encodeURIComponent(f.from)}&to=${encodeURIComponent(f.to)}&type=${tab}`)
+      .then((result) => { if (current) { setReturns(result.returns); setLoadError(""); } })
+      .catch((error) => { if (current) setLoadError(error instanceof Error ? error.message : "Could not load the returns report."); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [f.from, f.to, tab]);
 
   const ofTab = useMemo(() => returns.filter((r) => r.type === tab), [returns, tab]);
 
@@ -77,7 +90,8 @@ export default function ReturnsReportPage() {
     [lines]
   );
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loadError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{loadError}</p>;
 
   const requested = ofTab.filter((r) => inRange(requestedAt(r.createdAt), f.from, f.to)).length;
   const received = ofTab.filter((r) => inRange(r.returnReceivedAt ? new Date(r.returnReceivedAt) : null, f.from, f.to)).length;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { useOrders } from "@/lib/orders/store";
 import { useSettlements } from "@/lib/settlements/store";
 import { actualCourierCost, courierLoss, courierProfit, salesRevenue } from "@/lib/orders/utils";
 import { COURIER_RESULT_STATUSES, filterOrders, orderDateFor } from "@/lib/reports/orders";
@@ -10,6 +9,7 @@ import { trendBuckets } from "@/lib/reports/aggregate";
 import { num, pct, sum, taka } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
 import type { Order } from "@/lib/orders/types";
+import { useReportOrders } from "@/lib/reports/use-orders";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
@@ -38,8 +38,9 @@ const courierBill = (o: Order) => (o.status === "cancelled" ? 0 : actualCourierC
 export default function ReportsDashboardPage() {
   const state = useReportFilters("final_status", "daily");
   const f = state.applied;
-  const { orders, hydrated } = useOrders();
-  const { rows: settlementRows, hydrated: settlementsReady } = useSettlements();
+  const { orders, loading: ordersLoading, error: ordersError } = useReportOrders(f.from, f.to, f.dateType, true);
+  const { rowsFor, hydrated: settlementsReady } = useSettlements();
+  const settlementRows = useMemo(() => rowsFor(orders), [rowsFor, orders]);
 
   const settlementOf = useMemo(() => new Map(settlementRows.map((r) => [r.order.id, r])), [settlementRows]);
 
@@ -113,7 +114,8 @@ export default function ReportsDashboardPage() {
     return [...m.values()].sort((a, b) => b.total - a.total);
   }, [cohort]);
 
-  if (!hydrated || !settlementsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (ordersLoading || !settlementsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (ordersError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{ordersError}</p>;
 
   const count = (s: Order["status"]) => cohort.filter((o) => o.status === s).length;
   const cohortSettlements = cohort.map((o) => settlementOf.get(o.id)).filter((r): r is NonNullable<typeof r> => !!r);

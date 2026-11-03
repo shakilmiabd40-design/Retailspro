@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { useOrders } from "@/lib/orders/store";
 import { actualCourierCost, courierLoss, courierNet, courierProfit, ORDER_STATUS_LABELS } from "@/lib/orders/utils";
 import { COURIER_RESULT_STATUSES, filterOrders, orderDateFor } from "@/lib/reports/orders";
 import { formatDay, type DateTypeKey } from "@/lib/reports/dates";
@@ -15,6 +14,7 @@ import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { COLORS, TrendChart } from "@/components/reports/charts";
 import { OrderStatusBadge } from "@/components/orders/status-badge";
+import { useReportOrders } from "@/lib/reports/use-orders";
 
 const DATE_TYPES: DateTypeKey[] = ["final_status", "delivered", "dispatch", "order_created"];
 
@@ -25,7 +25,7 @@ const netForPl = (o: Order): number | null => (o.status === "partial_delivered" 
 export default function CourierReportPage() {
   const state = useReportFilters("final_status", "daily");
   const f = state.applied;
-  const { orders, hydrated } = useOrders();
+  const { orders, loading, error } = useReportOrders(f.from, f.to, f.dateType);
 
   const rows = useMemo(
     () => filterOrders(orders, f, { statuses: COURIER_RESULT_STATUSES }).sort((a, b) => (orderDateFor(b, f.dateType)?.getTime() ?? 0) - (orderDateFor(a, f.dateType)?.getTime() ?? 0)),
@@ -37,7 +37,8 @@ export default function CourierReportPage() {
     [rows, f]
   );
 
-  if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (loading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (error) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>;
 
   const profit = sum(rows, courierProfit);
   const loss = sum(rows, courierLoss);

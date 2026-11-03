@@ -17,10 +17,7 @@ import { UpdateStatusModal } from "@/components/orders/update-status-modal";
 import { formatTaka } from "@/lib/products/utils";
 import {
   canCancelOrder,
-  collectedAmount,
   courierCostForSummary,
-  courierLoss,
-  courierProfit,
   expectedCod,
   isFinalStatus,
   ORDER_STATUS_LABELS,
@@ -30,6 +27,12 @@ import type { Order, OrderStatus } from "@/lib/orders/types";
 
 const PAGE_SIZES = [20, 50, 100] as const;
 const ALL_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "delivered", "partial_delivered", "refuse_return", "cancelled"];
+type OrdersPageResponse = {
+  rows: { data: Order }[];
+  total: number;
+  pages: number;
+  summary: Record<string, number>;
+};
 
 function OrdersPageInner() {
   const { orders, deleteOrder, dispatchOrder, recordSteadfastBooking, markReturnReceived } = useOrders();
@@ -58,6 +61,9 @@ function OrdersPageInner() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(20);
+  const [pageData, setPageData] = useState<{ rows: Order[]; total: number; pages: number; summary: Record<string, number> }>({ rows: [], total: 0, pages: 0, summary: {} });
+  const [pageLoading, setPageLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
@@ -107,55 +113,35 @@ function OrdersPageInner() {
     [orders]
   );
 
-  const dateFiltered = useMemo(() => {
-    if (!dateFrom && !dateTo) return orders;
-    const from = dateFrom ? new Date(dateFrom).getTime() : -Infinity;
-    const to = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1 : Infinity;
-    return orders.filter((o) => {
-      const t = new Date(o.createdAt).getTime();
-      return t >= from && t <= to;
-    });
-  }, [orders, dateFrom, dateTo]);
+  // Fetch just the visible order rows and their totals. The existing order store remains the
+  // source for edits and bulk mutations, while the list's filters and pagination run in Postgres.
+  useEffect(() => {
+    let current = true;
+    const params = new URLSearchParams({ page: String(page), limit: String(pageSize), status, settlement });
+    if (search.trim()) params.set("search", search.trim());
+    if (courier !== "all") params.set("courier", courier);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+    setPageLoading(true);
+    const timer = setTimeout(() => {
+      api<OrdersPageResponse>("GET", `/api/orders?${params.toString()}`)
+        .then((result) => {
+          if (!current) return;
+          setPageData({ rows: result.rows.map((row) => row.data), total: result.total, pages: result.pages, summary: result.summary });
+          setPageError("");
+        })
+        .catch((error) => {
+          if (current) setPageError(error instanceof Error ? error.message : "Could not load orders.");
+        })
+        .finally(() => { if (current) setPageLoading(false); });
+    }, search.trim() ? 250 : 0);
+    return () => { current = false; clearTimeout(timer); };
+  }, [page, pageSize, status, settlement, search, courier, dateFrom, dateTo, orders]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return dateFiltered.filter((o) => {
-      if (q) {
-        const hit =
-          o.orderNumber.toLowerCase().includes(q) ||
-          o.customerName.toLowerCase().includes(q) ||
-          o.phone.toLowerCase().includes(q) ||
-          o.courier.trackingId.toLowerCase().includes(q);
-        if (!hit) return false;
-      }
-      if (status !== "all" && o.status !== status) return false;
-      if (courier !== "all" && o.courier.company !== courier) return false;
-      if (settlement !== "all" && o.delivery.settlementStatus !== settlement) return false;
-      return true;
-    });
-  }, [dateFiltered, search, status, courier, settlement]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const summary = pageData.summary;
+  const totalPages = Math.max(1, pageData.pages);
   const currentPage = Math.min(page, totalPages);
-  const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  const operational = useMemo(() => {
-    const counts: Record<string, number> = { total: dateFiltered.length };
-    for (const s of ALL_STATUSES) counts[s] = 0;
-    for (const o of dateFiltered) counts[o.status] += 1;
-    return counts;
-  }, [dateFiltered]);
-
-  const financial = useMemo(() => {
-    const active = dateFiltered.filter((o) => o.status !== "cancelled");
-    return {
-      totalCod: active.reduce((s, o) => s + expectedCod(o), 0),
-      collected: dateFiltered.reduce((s, o) => s + collectedAmount(o), 0),
-      courierCost: dateFiltered.reduce((s, o) => s + courierCostForSummary(o), 0),
-      courierProfit: dateFiltered.reduce((s, o) => s + courierProfit(o), 0),
-      courierLoss: dateFiltered.reduce((s, o) => s + courierLoss(o), 0),
-    };
-  }, [dateFiltered]);
+  const pageItems = pageData.rows;
 
   function clearFilters() {
     setSearch("");
@@ -375,7 +361,7 @@ function OrdersPageInner() {
             Orders
           </h1>
           <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
-            {dateFiltered.length} order{dateFiltered.length === 1 ? "" : "s"}
+            {summary.total ?? 0} order{summary.total === 1 ? "" : "s"}
             {dateFrom || dateTo ? " in range" : " total"}
           </p>
         </div>
@@ -391,23 +377,23 @@ function OrdersPageInner() {
 
       {/* Operational summary */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
-        <SummaryTile label="Total Orders" value={String(operational.total)} active={status === "all"} onClick={() => { router.push("/orders"); setPage(1); }} />
-        <SummaryTile label="Pending" value={String(operational.pending)} active={status === "pending"} onClick={() => { router.push("/orders?status=pending"); setPage(1); }} />
-        <SummaryTile label="Processing" value={String(operational.processing)} accent="var(--brand)" active={status === "processing"} onClick={() => { router.push("/orders?status=processing"); setPage(1); }} />
-        <SummaryTile label="In Transit" value={String(operational.in_transit)} accent="var(--blue)" active={status === "in_transit"} onClick={() => { router.push("/orders?status=in_transit"); setPage(1); }} />
-        <SummaryTile label="Delivered" value={String(operational.delivered)} accent="var(--green)" active={status === "delivered"} onClick={() => { router.push("/orders?status=delivered"); setPage(1); }} />
-        <SummaryTile label="Partial" value={String(operational.partial_delivered)} accent="#b45309" active={status === "partial_delivered"} onClick={() => { router.push("/orders?status=partial_delivered"); setPage(1); }} />
-        <SummaryTile label="Refuse" value={String(operational.refuse_return)} accent="var(--red)" active={status === "refuse_return"} onClick={() => { router.push("/orders?status=refuse_return"); setPage(1); }} />
-        <SummaryTile label="Cancelled" value={String(operational.cancelled)} accent="var(--text-faint)" active={status === "cancelled"} onClick={() => { router.push("/orders?status=cancelled"); setPage(1); }} />
+        <SummaryTile label="Total Orders" value={String(summary.total ?? 0)} active={status === "all"} onClick={() => { router.push("/orders"); setPage(1); }} />
+        <SummaryTile label="Pending" value={String(summary.pending ?? 0)} active={status === "pending"} onClick={() => { router.push("/orders?status=pending"); setPage(1); }} />
+        <SummaryTile label="Processing" value={String(summary.processing ?? 0)} accent="var(--brand)" active={status === "processing"} onClick={() => { router.push("/orders?status=processing"); setPage(1); }} />
+        <SummaryTile label="In Transit" value={String(summary.in_transit ?? 0)} accent="var(--blue)" active={status === "in_transit"} onClick={() => { router.push("/orders?status=in_transit"); setPage(1); }} />
+        <SummaryTile label="Delivered" value={String(summary.delivered ?? 0)} accent="var(--green)" active={status === "delivered"} onClick={() => { router.push("/orders?status=delivered"); setPage(1); }} />
+        <SummaryTile label="Partial" value={String(summary.partial_delivered ?? 0)} accent="#b45309" active={status === "partial_delivered"} onClick={() => { router.push("/orders?status=partial_delivered"); setPage(1); }} />
+        <SummaryTile label="Refuse" value={String(summary.refuse_return ?? 0)} accent="var(--red)" active={status === "refuse_return"} onClick={() => { router.push("/orders?status=refuse_return"); setPage(1); }} />
+        <SummaryTile label="Cancelled" value={String(summary.cancelled ?? 0)} accent="var(--text-faint)" active={status === "cancelled"} onClick={() => { router.push("/orders?status=cancelled"); setPage(1); }} />
       </div>
 
       {/* Financial summary */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <SummaryTile label="Total COD" value={formatTaka(financial.totalCod, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
-        <SummaryTile label="Collected Amount" value={formatTaka(financial.collected, 2)} accent="var(--green)" onClick={() => { setStatus("delivered"); setPage(1); }} />
-        <SummaryTile label="Courier Cost" value={formatTaka(financial.courierCost, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
-        <SummaryTile label="Courier Profit" value={formatTaka(financial.courierProfit, 2)} accent="var(--green)" onClick={() => { setStatus("all"); setPage(1); }} />
-        <SummaryTile label="Courier Loss" value={formatTaka(financial.courierLoss, 2)} accent="var(--red)" onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Total COD" value={formatTaka(summary.total_cod ?? 0, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Collected Amount" value={formatTaka(summary.collected ?? 0, 2)} accent="var(--green)" onClick={() => { setStatus("delivered"); setPage(1); }} />
+        <SummaryTile label="Courier Cost" value={formatTaka(summary.courier_cost ?? 0, 2)} onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Courier Profit" value={formatTaka(summary.courier_profit ?? 0, 2)} accent="var(--green)" onClick={() => { setStatus("all"); setPage(1); }} />
+        <SummaryTile label="Courier Loss" value={formatTaka(summary.courier_loss ?? 0, 2)} accent="var(--red)" onClick={() => { setStatus("all"); setPage(1); }} />
       </div>
 
       {/* Filters */}
@@ -484,7 +470,7 @@ function OrdersPageInner() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
             className="focus-ring rounded-xl border px-3 py-2 text-[13px]"
             style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
           />
@@ -493,7 +479,7 @@ function OrdersPageInner() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
             className="focus-ring rounded-xl border px-3 py-2 text-[13px]"
             style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
           />
@@ -594,6 +580,7 @@ function OrdersPageInner() {
       )}
 
       {/* Table */}
+      {pageError && <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{pageError}</p>}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1020px] border-collapse text-left">
@@ -710,11 +697,11 @@ function OrdersPageInner() {
           {pageItems.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 py-16">
               <p className="text-[13.5px] font-medium" style={{ color: "var(--text)" }}>
-                No orders found
+                {pageLoading ? "Loading orders…" : "No orders found"}
               </p>
-              <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+              {!pageLoading && <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
                 Try adjusting your filters, or create a new order.
-              </p>
+              </p>}
             </div>
           )}
         </div>
@@ -737,7 +724,7 @@ function OrdersPageInner() {
                 </option>
               ))}
             </select>
-            per page · {filtered.length} results
+            per page · {pageData.total} results{pageLoading ? " · loading" : ""}
           </div>
           <div className="flex items-center gap-2">
             <button

@@ -1,12 +1,14 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useProducts } from "@/lib/products/store";
 import type { StockLineItem } from "@/lib/products/store";
 import { useWarranty } from "@/lib/warranty/store";
 import { runtime } from "@/lib/settings/runtime";
 import { useSettings } from "@/lib/settings/store";
 import { useCollection } from "@/lib/persist/hooks";
+import { ordersCollectionActive } from "./routes";
 import { takeNumber } from "@/lib/persist/numbers";
 import { cancelReasonLabel, canCancelOrder, describeOrderChanges, foldOrderDiscount } from "./utils";
 import type {
@@ -164,12 +166,16 @@ interface OrdersContextValue {
 const OrdersContext = createContext<OrdersContextValue | null>(null);
 
 export function OrdersProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
   const { reserveStock, releaseStock, consumeStock, restoreStock, products } = useProducts();
   const { createWarrantiesForOrder, voidWarrantiesForOrderItem } = useWarranty();
   const { settings } = useSettings();
   // Settings → Orders: when "Return Received" isn't mandatory, stock is released the moment the outcome is recorded.
   const autoReceiveReturns = !settings.orders.returnReceivedMandatory;
-  const [orders, setOrders, hydrated] = useCollection<Order>("orders");
+  // Keep the full collection only on order workflows, screens that read order-linked data,
+  // and reports that still use client-side report calculations. Other modules use summary APIs.
+  const ordersActive = ordersCollectionActive(pathname);
+  const [orders, setOrders, hydrated] = useCollection<Order>("orders", undefined, ordersActive);
 
   const getOrder = (id: string) => orders.find((o) => o.id === id);
 

@@ -6,6 +6,7 @@ import { useOrders } from "@/lib/orders/store";
 import { buildAllocationIndex, computeSettlement, legacyFlagFor, type SettlementRow } from "./compute";
 import { EMPTY_SETTLEMENTS } from "./types";
 import type { CourierPayout, PayoutAllocation, SettlementData, SettlementOverride } from "./types";
+import type { Order } from "@/lib/orders/types";
 
 export interface NewPayoutInput {
   courier: string;
@@ -20,6 +21,8 @@ interface SettlementsContextValue {
   overrides: Record<string, SettlementOverride>;
   /** Settlement position of every order that is part of settlement tracking. */
   rows: SettlementRow[];
+  /** Settlement positions for a supplied, already-filtered order set. */
+  rowsFor: (orders: Order[]) => SettlementRow[];
   hydrated: boolean;
   getRow: (orderId: string) => SettlementRow | undefined;
   recordPayout: (input: NewPayoutInput) => { ok: true; payout: CourierPayout } | { ok: false; error: string };
@@ -35,10 +38,11 @@ export function SettlementsProvider({ children }: { children: ReactNode }) {
     normalize: (raw) => ({ ...EMPTY_SETTLEMENTS, ...(raw as Partial<SettlementData>) }),
   });
 
-  const rows = useMemo(() => {
+  const rowsFor = useMemo(() => {
     const index = buildAllocationIndex(data.payouts);
-    return orders.map((o) => computeSettlement(o, index, data.overrides)).filter((r) => r.applies);
-  }, [orders, data]);
+    return (orderList: Order[]) => orderList.map((o) => computeSettlement(o, index, data.overrides)).filter((r) => r.applies);
+  }, [data.payouts, data.overrides]);
+  const rows = useMemo(() => rowsFor(orders), [orders, rowsFor]);
 
   const value = useMemo<SettlementsContextValue>(() => {
     /** Keeps the order's own Settled / Pending flag (used by the Orders list filter) in step with the ledger. */
@@ -59,6 +63,7 @@ export function SettlementsProvider({ children }: { children: ReactNode }) {
       payouts: data.payouts,
       overrides: data.overrides,
       rows,
+      rowsFor,
       hydrated: loaded && ordersReady,
       getRow: (orderId) => rows.find((r) => r.order.id === orderId),
       recordPayout: (input) => {
@@ -102,7 +107,7 @@ export function SettlementsProvider({ children }: { children: ReactNode }) {
         if (data.payouts.some((p) => p.allocations.some((a) => a.orderId === orderId))) syncFlags(next, [orderId]);
       },
     };
-  }, [data, rows, loaded, ordersReady, orders, setSettlementFlags, setData]);
+  }, [data, rows, rowsFor, loaded, ordersReady, orders, setSettlementFlags, setData]);
 
   return <SettlementsContext.Provider value={value}>{children}</SettlementsContext.Provider>;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useCollection } from "@/lib/persist/hooks";
 import { takeNumberOrFallback } from "@/lib/persist/numbers";
 import { useProducts } from "@/lib/products/store";
@@ -46,11 +47,15 @@ interface ReturnsContextValue {
 const ReturnsContext = createContext<ReturnsContextValue | null>(null);
 
 export function ReturnsProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "";
   const { bulkUpdateStock } = useProducts();
   const { getOrder } = useOrders();
   const { voidWarrantiesForOrderItem } = useWarranty();
   const { settings } = useSettings();
-  const [returns, setReturns, hydrated] = useCollection<ReturnRecord>("returns");
+  const returnsActive = pathname.startsWith("/returns") || pathname.startsWith("/reports/product-sales") ||
+    pathname.startsWith("/reports/suppliers") ||
+    pathname.startsWith("/suppliers/");
+  const [returns, setReturns, hydrated] = useCollection<ReturnRecord>("returns", undefined, returnsActive);
 
   const getReturn = (id: string) => returns.find((r) => r.id === id);
 

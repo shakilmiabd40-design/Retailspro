@@ -57,6 +57,15 @@ create table if not exists app_records (
   primary key (collection, id)
 );
 create index if not exists app_records_order_idx on app_records (collection, seq desc);
+-- Orders list filters operate on the JSON record; keep their common indexed paths fast as history grows.
+create index if not exists app_records_orders_status_seq_idx on app_records ((data->>'status'), seq desc) where collection = 'orders';
+create index if not exists app_records_orders_created_seq_idx on app_records ((data->>'createdAt'), seq desc) where collection = 'orders';
+create index if not exists app_records_orders_courier_seq_idx on app_records ((data #>> '{courier,company}'), seq desc) where collection = 'orders';
+create index if not exists app_records_orders_settlement_seq_idx on app_records ((data #>> '{delivery,settlementStatus}'), seq desc) where collection = 'orders';
+create index if not exists app_records_journals_date_idx on app_records ((data->>'date') desc, (data->>'createdAt') desc, seq desc) where collection = 'journal_entries';
+create index if not exists app_records_returns_type_created_idx on app_records ((data->>'type'), (data->>'createdAt')) where collection = 'returns';
+create index if not exists app_records_returns_type_received_idx on app_records ((data->>'type'), (data->>'returnReceivedAt')) where collection = 'returns';
+create index if not exists app_records_warranties_start_idx on app_records ((data->>'startDate')) where collection = 'warranties';
 
 -- Singleton documents: settings, product catalog, settlement ledger, notification state.
 create table if not exists app_documents (
