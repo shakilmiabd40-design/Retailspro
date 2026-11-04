@@ -97,6 +97,8 @@ Unacknowledged notifications escalate after 30 min (Critical), 60 min (Out of St
 
 `open` → `acknowledged` → `resolved`. Available actions (store methods): `acknowledge`, `assign` (role + optional name), `resolve`, `markRead`, `clearResolved`. Info-level notifications never raise the unread badge; warning and critical ones do.
 
+New-order email is controlled by **Settings → Notifications → New order created**. When enabled with Email selected, the server sends one message to active users in the selected roles for each newly created order. A database uniqueness claim prevents duplicate mail when sync retries; failed sends release the claim so a later retry can deliver.
+
 ## Extending it
 
 - **Send real emails / push / SMS:** call your service from a new effect or server route whenever `syncNotifications()` returns new notifications, using `toPayload()` as the body and `channels` to pick the transport.

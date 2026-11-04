@@ -7,7 +7,7 @@ import { FormShell, PageHeader, Section, SettingsGate, SoonTag, Toggle, useSecti
 
 const EVENTS: { key: NotificationEventKey; label: string; description: string; live: boolean }[] = [
   { key: "lowStock", label: "Low stock alerts", description: "A variant drops to Replenish, Critical or Out of stock.", live: true },
-  { key: "newOrder", label: "New order created", description: "Someone creates an order.", live: false },
+  { key: "newOrder", label: "New order created", description: "Someone creates an order. Selected roles can receive an email.", live: true },
   { key: "returnRequest", label: "Return request", description: "A customer or supplier return is logged.", live: false },
   { key: "settlementReminder", label: "Settlement pending reminder (weekly)", description: "A weekly nudge listing unsettled courier payouts.", live: false },
 ];
@@ -28,7 +28,7 @@ function NotificationsForm() {
   return (
     <FormShell form={form}>
       <div className="rounded-xl border px-4 py-3 text-[12.5px]" style={{ background: "var(--surface-2)", borderColor: "var(--border-soft)", color: "var(--text-muted)" }}>
-        Stock alerts already appear in-app (the bell and the Notifications page). <b>Low stock alerts → Email</b> really sends — turn it on, tick the roles below, and each of those people gets a real email (their account email) the moment a variant drops to Replenish, Critical or Out of Stock. SMS, and email for the other events below, are recorded here for later — nothing is sent for them yet. Stock thresholds and escalation live in{" "}
+        Stock alerts appear in-app and can be emailed to the selected roles. New order alerts appear in the Notifications bell and can also be emailed to those roles when an order is created. SMS and return / settlement notifications are not sent yet. Stock thresholds and escalation live in{" "}
         <Link href="/notifications/settings" className="underline" style={{ color: "var(--brand-strong)" }}>
           Notifications → Thresholds &amp; routing
         </Link>

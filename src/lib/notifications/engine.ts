@@ -449,12 +449,15 @@ export function syncNotifications(prev: NotificationsData, snaps: SkuSnapshot[],
     });
     states[snap.variantId] = { status, level, since: now };
 
+    const alreadyOpen = notifications.some((n) => n.variantId === snap.variantId && n.status === status && n.state !== "resolved");
     const resolution: Resolution = status === "on_target" ? (before?.status === "hold_blocked" ? "hold_released" : "stock_recovered") : "superseded";
-    closeOpen(notifications, snap.variantId, resolution, now);
+    // A transiently missing snapshot (or a stale browser state) can lose the tracked-state entry
+    // while its notification remains open. Reconcile the state without superseding/reopening it.
+    if (!alreadyOpen) closeOpen(notifications, snap.variantId, resolution, now);
 
     if (status === "on_target") {
       if (before && RECOVERABLE_FROM.includes(before.status) && isStatusEnabled("complete", cfg)) notifications.push(buildNotification("complete", snap, cfg, now));
-    } else if ((firstSight ? NOTIFY_ON_FIRST_SIGHT.includes(status) : true) && isStatusEnabled(status, cfg)) {
+    } else if (!alreadyOpen && (firstSight ? NOTIFY_ON_FIRST_SIGHT.includes(status) : true) && isStatusEnabled(status, cfg)) {
       notifications.push(buildNotification(status, snap, cfg, now));
     }
   }

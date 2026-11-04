@@ -14,6 +14,7 @@ import type { Product } from "@/lib/products/types";
 import type { JournalEntry, ChartOfAccount, AccountingPeriod } from "@/lib/accounting/gl-types";
 import { assertJournalMutation } from "@/server/accounting/guards";
 import { postAccountingChanges, type AccountingChanges } from "@/server/accounting/auto-post";
+import { sendNewOrderNotificationEmail } from "@/server/order-notification-email";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,7 @@ export const POST = route(async (req) => {
   const seeProductCost = canSeeProductCost(auth.role);
   let queuedEvents = 0;
   const whatsappNotifications: { prev: Order | undefined; next: Order }[] = [];
+  const newOrderNotifications: Order[] = [];
   const journalMutations: { previous?: JournalEntry; next: JournalEntry | null }[] = [];
   const periodMutations: { previous?: AccountingPeriod; next: AccountingPeriod | null }[] = [];
 
@@ -137,6 +139,11 @@ export const POST = route(async (req) => {
       if (touched) revs[name] = await bumpRev(client, name);
 
       // A bug in event building must never stop a sale from being saved, so it is fenced off.
+      if (name === "orders" && !conflicts.length) {
+        for (const u of upserts) {
+          if (!before.has(u.id)) newOrderNotifications.push((effective.get(u.id) ?? u.data) as unknown as Order);
+        }
+      }
       if (listening && !conflicts.length) {
         try {
           if (name === "orders") {
@@ -264,6 +271,10 @@ export const POST = route(async (req) => {
 
   if (whatsappNotifications.length) {
     after(() => Promise.all(whatsappNotifications.map(({ prev, next }) => handleOrderStatusWhatsAppNotification(prev, next))));
+  }
+
+  if (newOrderNotifications.length) {
+    after(() => Promise.all(newOrderNotifications.map((order) => sendNewOrderNotificationEmail(order))));
   }
 
   return json({ ok: true, versions, documents: docVersions, revs });
