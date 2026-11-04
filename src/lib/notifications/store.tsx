@@ -90,8 +90,8 @@ function clampSettings(s: NotificationSettings): NotificationSettings {
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
   const dashboard = pathname === "/";
-  const { products, hydrated: productsReady } = useProducts();
-  const { purchaseOrders, hydrated: posReady } = usePurchaseOrders();
+  const { products, loaded: productsLoaded } = useProducts();
+  const { purchaseOrders, loaded: posLoaded } = usePurchaseOrders();
   // Alerts are derived from stock levels, so last-write-wins is fine (no version conflicts to resolve).
   const [data, setData, dataLoaded] = useDocument<NotificationsData>("notifications_data", EMPTY_DATA, { force: true });
   const [settings, setSettings, settingsLoaded] = useDocument<NotificationSettings>("notifications_settings", DEFAULT_SETTINGS, {
@@ -114,6 +114,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         if (revision) params.set("revision", revision);
         const result = await api<{ snapshots?: SkuSnapshot[]; revision: string; unchanged?: boolean }>("GET", `/api/notifications/snapshots${params.size ? `?${params}` : ""}`);
         if (!current) return;
+        // "forbidden" means the role cannot read products at all. The empty list in that response is not a
+        // real "nothing is low on stock" snapshot, so treating it as one would resolve every open alert.
+        if (result.revision === "forbidden") return;
         revision = result.revision;
         if (!result.unchanged) setRemoteSnapshots(result.snapshots ?? []);
       } catch { /* Keep the last good snapshot; a transient read failure must not clear alerts. */ }
@@ -123,7 +126,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const timer = setInterval(() => void refresh(), 60_000);
     return () => { current = false; clearInterval(timer); };
   }, [dashboard]);
-  const ready = loaded && (dashboard ? remoteSnapshots !== null : productsReady && posReady);
+  // Product / PO collections are intentionally disabled on the dashboard, and "hydrated" is true for a
+  // disabled collection. Syncing with that empty list resolves every tracked state and re-creates the
+  // alerts as new (unread) notifications on the next route, so wait for `loaded` (a real server read) here.
+  const ready = loaded && (dashboard ? remoteSnapshots !== null : productsLoaded && posLoaded);
   const snapshots = useMemo(() => dashboard ? remoteSnapshots ?? [] : (ready ? snapshotSkus(products, purchaseOrders) : []), [dashboard, remoteSnapshots, ready, products, purchaseOrders]);
 
   // Newly-opened Replenish / Critical / Out of stock notifications queue up here, then get emailed by the

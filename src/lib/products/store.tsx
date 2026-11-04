@@ -36,6 +36,8 @@ const DEFAULT_CATALOG: Catalog = {
 interface ProductsContextValue {
   products: Product[];
   hydrated: boolean;
+  /** True once the product collection has actually been read from the server (not merely "not needed" on this route). */
+  loaded: boolean;
   catalog: Catalog;
   addProduct: (p: Product) => void;
   updateProduct: (id: string, updater: (p: Product) => Product) => void;
@@ -62,7 +64,7 @@ const ProductsContext = createContext<ProductsContextValue | null>(null);
 
 export function ProductsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
-  const [products, setProducts, productsReady] = useCollection<Product>("products", (p) => ({
+  const [products, setProducts, productsReady, productsLoaded] = useCollection<Product>("products", (p) => ({
     ...p,
     // Older records may predate the `reserved` field on variants.
     variants: p.variants.map((v) => ({ ...v, reserved: v.reserved ?? 0 })),
@@ -226,6 +228,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     () => ({
       products,
       hydrated,
+      loaded: productsLoaded,
       catalog,
       addProduct,
       updateProduct,
@@ -246,7 +249,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       removeCatalogItem,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [products, hydrated, catalog]
+    [products, hydrated, productsLoaded, catalog]
   );
 
   return <ProductsContext.Provider value={value}>{children}</ProductsContext.Provider>;

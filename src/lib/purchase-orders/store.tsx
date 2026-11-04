@@ -25,6 +25,8 @@ export type NewPoInput = {
 interface PurchaseOrdersContextValue {
   purchaseOrders: PurchaseOrder[];
   hydrated: boolean;
+  /** True once the purchase-order collection has actually been read from the server. */
+  loaded: boolean;
   getPo: (id: string) => PurchaseOrder | undefined;
   createPo: (input: NewPoInput) => PurchaseOrder;
   updatePo: (id: string, updater: (po: PurchaseOrder) => PurchaseOrder) => void;
@@ -41,7 +43,7 @@ export function PurchaseOrdersProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
   const { bulkUpdateStock } = useProducts();
   const { settings } = useSettings();
-  const [purchaseOrders, setPurchaseOrders, hydrated] = useCollection<PurchaseOrder>("purchase_orders", undefined, pathname !== "/");
+  const [purchaseOrders, setPurchaseOrders, hydrated, sourceLoaded] = useCollection<PurchaseOrder>("purchase_orders", undefined, pathname !== "/");
 
   const getPo = (id: string) => purchaseOrders.find((p) => p.id === id);
 
@@ -121,9 +123,9 @@ export function PurchaseOrdersProvider({ children }: { children: ReactNode }) {
   }
 
   const value = useMemo<PurchaseOrdersContextValue>(
-    () => ({ purchaseOrders, hydrated, getPo, createPo, updatePo, approvePo, sendPo, cancelPo, deletePo, receiveStock }),
+    () => ({ purchaseOrders, hydrated, loaded: sourceLoaded, getPo, createPo, updatePo, approvePo, sendPo, cancelPo, deletePo, receiveStock }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [purchaseOrders, hydrated]
+    [purchaseOrders, hydrated, sourceLoaded]
   );
 
   return <PurchaseOrdersContext.Provider value={value}>{children}</PurchaseOrdersContext.Provider>;

@@ -8,9 +8,17 @@ import { syncManager, type CollectionAdapter, type DocumentAdapter, type Row } f
  * Drop-in replacement for `useState(seed)` + "load from localStorage" + "save to localStorage" in a store:
  * the same setter, but the list lives in the database.
  */
-export function useCollection<T extends { id: string }>(name: CollectionName, normalize?: (item: T) => T, enabled = true): [T[], Dispatch<SetStateAction<T[]>>, boolean] {
+export function useCollection<T extends { id: string }>(
+  name: CollectionName,
+  normalize?: (item: T) => T,
+  enabled = true
+): [T[], Dispatch<SetStateAction<T[]>>, boolean, boolean] {
   const [items, setItems] = useState<T[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  // True only once this collection has actually been read from the server (or refused by permissions).
+  // `hydrated` is deliberately true while a collection is disabled/not needed, so callers that derive
+  // data from the collection (e.g. the notification engine) must use this instead.
+  const [sourceLoaded, setSourceLoaded] = useState(false);
   const itemsRef = useRef<T[]>(items);
   const norm = useRef(normalize);
   const state = useRef({ synced: new Map<string, { json: string; version: number }>(), loaded: false, registered: false });
@@ -32,12 +40,14 @@ export function useCollection<T extends { id: string }>(name: CollectionName, no
       s.synced.clear();
       itemsRef.current = [];
       setItems([]);
+      setSourceLoaded(false);
       setHydrated(true);
       return;
     }
     // A collection may have been intentionally unloaded on the previous route. Do not
     // expose the previous route's hydrated flag while the fresh snapshot is in flight.
     setHydrated(false);
+    setSourceLoaded(false);
     const jsonOf = (item: T) => {
       let j = cache.current.get(item);
       if (j === undefined) {
@@ -65,12 +75,14 @@ export function useCollection<T extends { id: string }>(name: CollectionName, no
         adapter.rev = rev;
         itemsRef.current = list;
         setItems(list);
+        setSourceLoaded(true);
         setHydrated(true);
       },
       applyForbidden() {
         s.loaded = true;
         itemsRef.current = [];
         setItems([]);
+        setSourceLoaded(true);
         setHydrated(true);
       },
       collect() {
@@ -111,7 +123,7 @@ export function useCollection<T extends { id: string }>(name: CollectionName, no
     s.loaded = false;
   }, [name]);
 
-  return [items, setItems, hydrated];
+  return [items, setItems, hydrated, sourceLoaded];
 }
 
 /** Same idea for a single JSON document (settings, catalog, settlement ledger…). */
