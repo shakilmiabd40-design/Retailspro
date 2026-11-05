@@ -9,8 +9,9 @@ import { OWNER_ROLE_LABELS, STATUS_LABELS } from "@/lib/notifications/engine";
 import type { InventoryStatus, Severity } from "@/lib/notifications/types";
 import { useToast } from "@/components/toast";
 import { InventoryStatusBadge, SeverityBadge, StateChip, STATUS_STYLES } from "@/components/notifications/badges";
+import { useAccess } from "@/lib/settings/access";
 
-type Tab = "alerts" | "board" | "courier";
+type Tab = "alerts" | "board" | "courier" | "orders";
 type StateFilter = "active" | "resolved" | "all";
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
@@ -20,7 +21,8 @@ const TILE_STATUSES: InventoryStatus[] = ["out_of_stock", "critical", "replenish
 const selectStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 
 export default function NotificationsPage() {
-  const { notifications, orderUpdates, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
+  const { notifications, orderUpdates, newOrders, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, markNewOrderRead, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
+  const { currentRole } = useAccess();
   const showToast = useToast();
 
   const [tab, setTab] = useState<Tab>("alerts");
@@ -65,8 +67,9 @@ export default function NotificationsPage() {
     [board, statusFilter, q]
   );
 
-  const activeCount = notifications.filter((n) => n.state !== "resolved").length + orderUpdates.filter((n) => !n.read).length;
-  const unackCount = notifications.filter((n) => n.state === "open").length + orderUpdates.filter((n) => !n.read).length;
+  const routedOrders = newOrders.filter((n) => n.roleIds.includes(currentRole.id));
+  const activeCount = notifications.filter((n) => n.state !== "resolved").length + orderUpdates.filter((n) => !n.read).length + routedOrders.filter((n) => !n.read).length;
+  const unackCount = notifications.filter((n) => n.state === "open").length + orderUpdates.filter((n) => !n.read).length + routedOrders.filter((n) => !n.read).length;
   const hasResolved = notifications.some((n) => n.state === "resolved");
 
   if (!hydrated) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
@@ -140,6 +143,7 @@ export default function NotificationsPage() {
                 ["alerts", "Alerts"],
                 ["board", "Stock status"],
                 ["courier", `Courier COD (${orderUpdates.filter((n) => !n.read).length})`],
+                ["orders", `New orders (${routedOrders.filter((n) => !n.read).length})`],
               ] as [Tab, string][]
             ).map(([key, label]) => (
               <button
@@ -161,7 +165,7 @@ export default function NotificationsPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={tab === "courier" ? "Search order number" : "Search product or SKU"}
+              placeholder={tab === "courier" || tab === "orders" ? "Search order number" : "Search product or SKU"}
               className="w-full bg-transparent text-[13px] outline-none"
               style={{ color: "var(--text)" }}
             />
@@ -174,7 +178,7 @@ export default function NotificationsPage() {
               <option value="all">All</option>
             </select>
           )}
-          {tab !== "courier" && <select
+          {tab !== "courier" && tab !== "orders" && <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as InventoryStatus | "all")}
             className="focus-ring rounded-xl border px-3 py-2 text-[13px]"
@@ -205,7 +209,18 @@ export default function NotificationsPage() {
           )}
         </div>
 
-        {tab === "courier" ? (
+        {tab === "orders" ? (
+          routedOrders.filter((order) => !q || order.orderNumber.toLowerCase().includes(q) || order.customerName.toLowerCase().includes(q)).length === 0 ? (
+            <p className="px-4 py-14 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>No new order notifications.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] border-collapse text-left text-[13px]">
+                <thead><tr className="text-[11.5px]" style={{ color: "var(--text-faint)", background: "var(--surface-2)" }}><th className="px-4 py-2.5">Order</th><th className="px-4 py-2.5">Customer</th><th className="px-4 py-2.5">When</th><th className="px-4 py-2.5" /></tr></thead>
+                <tbody>{routedOrders.filter((order) => !q || order.orderNumber.toLowerCase().includes(q) || order.customerName.toLowerCase().includes(q)).map((order) => <tr key={order.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}><td className="px-4 py-3"><Link href={`/orders/${order.orderId}`} className="font-medium hover:underline" style={{ color: "var(--brand)" }}>#{order.orderNumber}</Link>{!order.read && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>New</span>}</td><td className="px-4 py-3" style={{ color: "var(--text-muted)" }}>{order.customerName}</td><td className="whitespace-nowrap px-4 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>{timeAgo(order.timestamp)}</td><td className="px-4 py-3 text-right">{!order.read && <button onClick={() => markNewOrderRead(order.id)} className="rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text)" }}>Mark read</button>}</td></tr>)}</tbody>
+              </table>
+            </div>
+          )
+        ) : tab === "courier" ? (
           orderUpdates.filter((update) => !q || update.orderNumber.toLowerCase().includes(q)).length === 0 ? (
             <p className="px-4 py-14 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>No courier COD updates.</p>
           ) : (

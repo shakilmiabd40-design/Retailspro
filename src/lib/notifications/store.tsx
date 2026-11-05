@@ -29,6 +29,7 @@ import type {
   StatusTransition,
   OrderCodUpdate,
   OrderNotificationsData,
+  NewOrderNotification,
 } from "./types";
 
 const ACTOR = "You";
@@ -44,6 +45,7 @@ export interface BoardRow extends SkuSnapshot {
 interface NotificationsContextValue {
   notifications: InventoryNotification[];
   orderUpdates: OrderCodUpdate[];
+  newOrders: NewOrderNotification[];
   board: BoardRow[];
   settings: NotificationSettings;
   hydrated: boolean;
@@ -55,6 +57,7 @@ interface NotificationsContextValue {
   markRead: (id: string) => void;
   markAllRead: () => void;
   markOrderUpdateRead: (id: string) => void;
+  markNewOrderRead: (id: string) => void;
   acknowledge: (id: string) => void;
   acknowledgeAll: () => void;
   assign: (id: string, input: { ownerRole: OwnerRole; assignee?: string }) => void;
@@ -204,10 +207,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     () => ({
       notifications: data.notifications,
       orderUpdates: orderNotificationData.updates,
+      newOrders: orderNotificationData.newOrders ?? [],
       board,
       settings,
       hydrated: ready,
-      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length + orderNotificationData.updates.filter((n) => !n.read).length,
+      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length + orderNotificationData.updates.filter((n) => !n.read).length + (orderNotificationData.newOrders ?? []).filter((n) => !n.read).length,
       getNotification: (id) => data.notifications.find((n) => n.id === id),
       historyFor: (variantId) => data.history.filter((h) => h.variantId === variantId).sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
       linkedPurchaseOrders: (variantId) =>
@@ -220,6 +224,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.read ? n : { ...n, read: true }) }));
       },
       markOrderUpdateRead: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.id === id ? { ...n, read: true } : n) })),
+      markNewOrderRead: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).map((n) => n.id === id ? { ...n, read: true } : n) })),
       acknowledge: (id) =>
         patchOne(id, (n, now) =>
           n.state !== "open" ? n : { ...n, state: "acknowledged", read: true, acknowledgedAt: now, activity: log(n, now, "Acknowledged", `By ${ACTOR}`) }

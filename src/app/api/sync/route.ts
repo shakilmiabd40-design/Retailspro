@@ -217,6 +217,37 @@ export const POST = route(async (req) => {
       }
     }
 
+    // New-order in-app alerts are written with the order, so they are available even if no
+    // browser happens to be open when the order is created.
+    if (newOrderNotifications.length) {
+      const { rows: settingRows } = await client.query<{ data: { notifications?: { events?: { newOrder?: { enabled?: boolean; inApp?: boolean; roleIds?: string[] } } } } }>(
+        "select data from app_documents where key='settings' limit 1"
+      );
+      const eventPref = settingRows[0]?.data?.notifications?.events?.newOrder;
+      if (eventPref?.enabled && eventPref.inApp && eventPref.roleIds?.length) {
+        const { rows } = await client.query<{ data: { updates?: unknown[]; newOrders?: unknown[] } }>(
+          "select data from app_documents where key='order_notifications' for update"
+        );
+        const current = rows[0]?.data ?? { updates: [], newOrders: [] };
+        const newOrders = [...(current.newOrders ?? []), ...newOrderNotifications.map((order) => ({
+          id: `new_order:${order.id}`,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          timestamp: new Date().toISOString(),
+          read: false,
+          roleIds: eventPref.roleIds!,
+        }))].slice(-200);
+        const saved = await client.query<{ version: number }>(
+          `insert into app_documents(key,data,updated_by) values('order_notifications',$1::jsonb,$2)
+           on conflict(key) do update set data=excluded.data,version=app_documents.version+1,updated_at=now(),updated_by=excluded.updated_by`,
+          [JSON.stringify({ ...current, updates: current.updates ?? [], newOrders }), actor]
+        );
+        docVersions.order_notifications = Number(saved.rows[0]?.version ?? 1);
+        revs.order_notifications = await bumpRev(client, "order_notifications");
+      }
+    }
+
     if (conflicts.length) throw new ApiError(409, "conflict", "Someone else changed this data first.", { conflicts });
 
     if (Object.values(accountingChanges).some((changes) => changes?.size)) {

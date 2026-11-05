@@ -121,8 +121,19 @@ export interface OrderCodUpdate {
   read: boolean;
 }
 
+export interface NewOrderNotification {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  timestamp: string;
+  read: boolean;
+  roleIds: string[];
+}
+
 export interface OrderNotificationsData {
   updates: OrderCodUpdate[];
+  newOrders?: NewOrderNotification[];
 }
 
 export interface NotificationSettings {
