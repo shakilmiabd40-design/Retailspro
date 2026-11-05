@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readPaidAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -67,4 +67,12 @@ test("consignment_update reads the changed COD from values and prefers it to a s
   assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", cod_amount: 2490, values: { cod_amount: "1890.00" } }), 1890);
   assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", values: { cod_amount: 0 } }), 0);
   assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", values: { cus_address: "House 12" } }), null);
+});
+
+test("partial-delivery rider note supplies collected amount when COD is absent or stale", () => {
+  const message = 'Consignment has been marked as partially delivered at the hub. Note: Rider Note: "কাস্টমার পার্সেল নেবেনা বিকাশে ১০০ টাকা ডেলিভারি চার্জ দিয়েছে"';
+  assert.equal(readRiderNoteAmount(message), 100);
+  assert.equal(readCourierPaidAmount({ status: "partial_delivered", tracking_message: message }), 100);
+  assert.equal(readCourierPaidAmount({ status: "partial_delivered", cod_amount: 2490, tracking_message: message }), 100);
+  assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 80);
 });

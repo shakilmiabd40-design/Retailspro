@@ -116,13 +116,31 @@ function readExplicitCollectedAmount(source: Record<string, unknown> | null | un
   return null;
 }
 
-/** When a flat payload and nested consignment disagree, trust the consignment's collected amount first. */
+const BENGALI_DIGITS: Record<string, string> = { "০": "0", "১": "1", "২": "2", "৩": "3", "৪": "4", "৫": "5", "৬": "6", "৭": "7", "৮": "8", "৯": "9" };
+
+/** Read an explicit taka amount from the rider's note, including Bengali numerals. */
+export function readRiderNoteAmount(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const noteMarker = /rider\s*note|রাইডার\s*নোট/i.exec(raw);
+  if (!noteMarker) return null;
+  const note = raw.slice(noteMarker.index + noteMarker[0].length).replace(/[০-৯]/g, (digit) => BENGALI_DIGITS[digit]);
+  const amount = /(?:৳\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:টাকা|taka\b|tk\b|bdt\b))/i.exec(note);
+  return toAmount(amount?.[1] ?? amount?.[2]);
+}
+
+/** Prefer explicit collected figures, then a rider note, then COD values that may still be stale. */
 export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
   const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)
     ? event.values as Record<string, unknown>
     : null;
+  const trackingMessage = values?.tracking_message ?? event?.tracking_message ?? consignment?.tracking_message;
   // `consignment_update` carries changed fields in `values`; prefer those over any stale
   // top-level COD value included alongside the change metadata.
-  return readPaidAmount(values) ?? readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event) ??
-    readPaidAmount(consignment) ?? readPaidAmount(event);
+  const collected = readExplicitCollectedAmount(values) ?? readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event);
+  if (collected !== null) return collected;
+  const changedCod = readPaidAmount(values);
+  if (changedCod !== null) return changedCod;
+  const riderNote = readRiderNoteAmount(trackingMessage);
+  if (riderNote !== null) return riderNote;
+  return readPaidAmount(consignment) ?? readPaidAmount(event);
 }
