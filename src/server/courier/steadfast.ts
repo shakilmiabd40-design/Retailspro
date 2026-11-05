@@ -1,6 +1,6 @@
 import "server-only";
 import { query } from "../db";
-import { readCourierPaidAmount } from "./steadfast-status";
+import { readCourierPaidAmount, readLatestRiderTrackingMessage } from "./steadfast-status";
 
 /**
  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
@@ -204,4 +204,11 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
       ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
     },
   };
+}
+
+/** Loads tracking history and returns its newest rider-note message, if one is present. */
+export async function getSteadfastRiderNoteByInvoice(invoice: string): Promise<CallResult<string | null>> {
+  const res = await call<Record<string, unknown>>(`/trackings_by_invoice/${encodeURIComponent(invoice)}`);
+  if (!res.ok) return res;
+  return { ok: true, data: readLatestRiderTrackingMessage(res.data) };
 }

@@ -128,6 +128,24 @@ export function readRiderNoteAmount(raw: unknown): number | null {
   return toAmount(amount?.[1] ?? amount?.[2]);
 }
 
+/** Pick the newest tracking-history message containing a rider note. */
+export function readLatestRiderTrackingMessage(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const body = raw as Record<string, unknown>;
+  const data = body.data && typeof body.data === "object" && !Array.isArray(body.data) ? body.data as Record<string, unknown> : null;
+  const records = Array.isArray(body.tracking) ? body.tracking : Array.isArray(data?.tracking) ? data.tracking : Array.isArray(body.data) ? body.data : [];
+  const notes = records.flatMap((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const message = typeof record.text === "string" ? record.text : typeof record.tracking_message === "string" ? record.tracking_message : "";
+    if (readRiderNoteAmount(message) === null) return [];
+    const date = Date.parse(String(record.created_at ?? record.updated_at ?? ""));
+    return [{ message, index, date: Number.isFinite(date) ? date : null }];
+  });
+  notes.sort((a, b) => a.date !== null && b.date !== null ? a.date - b.date || a.index - b.index : a.index - b.index);
+  return notes.at(-1)?.message ?? null;
+}
+
 /** Prefer explicit collected figures, then a rider note, then COD values that may still be stale. */
 export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
   const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)

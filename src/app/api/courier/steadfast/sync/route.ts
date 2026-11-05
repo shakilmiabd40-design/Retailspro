@@ -5,8 +5,9 @@ import { ApiError, json, readJson, route, str } from "@/server/http";
 import { requireAuth } from "@/server/auth";
 import { deliverDue } from "@/server/publicapi/webhooks";
 import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
-import { getSteadfastConsignment, getSteadfastConsignmentByInvoice } from "@/server/courier/steadfast";
+import { getSteadfastConsignment, getSteadfastConsignmentByInvoice, getSteadfastRiderNoteByInvoice } from "@/server/courier/steadfast";
 import { applyStatusToOrder, loadOrderForConsignment } from "@/server/courier/apply-steadfast-status";
+import { normalizeSteadfastStatus } from "@/server/courier/steadfast-status";
 import type { Order } from "@/lib/orders/types";
 
 export const dynamic = "force-dynamic";
@@ -47,10 +48,22 @@ export const POST = route(async (req) => {
     : await getSteadfastConsignmentByInvoice(orderNumber);
   if (!remote.ok) throw new ApiError(502, "steadfast_error", remote.error);
 
+  // The status lookup only reports a status code and delivery status. For partial deliveries,
+  // also read tracking history because the rider's actual collection amount is recorded in its note.
+  let statusPayload = remote.data;
+  if (normalizeSteadfastStatus(remote.data.status).startsWith("partial_delivered")) {
+    const riderNote = await getSteadfastRiderNoteByInvoice(orderNumber);
+    if (riderNote.ok && riderNote.data) {
+      statusPayload = { ...remote.data, tracking_message: riderNote.data };
+    } else if (!riderNote.ok) {
+      console.warn(`[steadfast] couldn't load rider note for invoice=${orderNumber}: ${riderNote.error}`);
+    }
+  }
+
   const result = await tx(async (client) => {
     const row = await loadOrderForConsignment(client, { consignmentId: trackingId || undefined, invoice: orderNumber });
     if (!row) return null;
-    return applyStatusToOrder(client, row, remote.data, "steadfast_sync");
+    return applyStatusToOrder(client, row, statusPayload, "steadfast_sync");
   });
   if (!result) throw new ApiError(404, "not_found", "The order disappeared while syncing.");
 

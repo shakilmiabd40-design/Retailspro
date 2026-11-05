@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -75,4 +75,18 @@ test("partial-delivery rider note supplies collected amount when COD is absent o
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", tracking_message: message }), 100);
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", cod_amount: 2490, tracking_message: message }), 100);
   assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 80);
+});
+
+test("tracking history selects the newest rider-note entry for manual partial-delivery sync", () => {
+  const latest = 'Partial delivery. Note: Rider Note: "কাস্টমার বিকাশে ১০০ টাকা দিয়েছে"';
+  const history = {
+    status: 200,
+    tracking: [
+      { text: 'Partial delivery. Note: Rider Note: "কাস্টমার ৫০ টাকা দিয়েছে"', created_at: "2026-11-04T10:00:00Z" },
+      { text: latest, created_at: "2026-11-05T10:00:00Z" },
+      { text: "Parcel reached hub", created_at: "2026-11-05T11:00:00Z" },
+    ],
+  };
+  assert.equal(readLatestRiderTrackingMessage(history), latest);
+  assert.equal(readCourierPaidAmount({ tracking_message: readLatestRiderTrackingMessage(history) }), 100);
 });
