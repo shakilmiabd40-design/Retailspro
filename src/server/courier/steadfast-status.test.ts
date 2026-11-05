@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readPaidAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readPaidAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -61,4 +61,10 @@ test("the paid amount is read from any of the field names Steadfast uses", () =>
   assert.equal(readPaidAmount({ cod_amount: 1200, collected_amount: 450 }), 450);
   assert.equal(readPaidAmount({}), null);
   assert.equal(readPaidAmount(null), null);
+});
+
+test("consignment_update reads the changed COD from values and prefers it to a stale top-level amount", () => {
+  assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", cod_amount: 2490, values: { cod_amount: "1890.00" } }), 1890);
+  assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", values: { cod_amount: 0 } }), 0);
+  assert.equal(readCourierPaidAmount({ notification_type: "consignment_update", values: { cus_address: "House 12" } }), null);
 });
