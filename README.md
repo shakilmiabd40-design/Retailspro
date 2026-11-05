@@ -286,7 +286,7 @@ with 401 and Steadfast never retries a 4xx.
   Cancelled status is only for orders cancelled before they reached the courier).
   `in_review`, `hold`, `unknown` and the unconfirmed `*_approval_pending`
   stages leave the order in Processing on purpose.
-- A `cod_amount` on any Steadfast event is treated as what the customer actually paid.
+- COD fields on a Steadfast event, including `values.cod_amount` on `consignment_update`, are treated as what the customer actually paid.
   Steadfast revises it when a partial-delivery customer pays less, so a later
   amount-change webhook updates the order's **Customer Paid** figure even though the
   status stays Partial Delivered.

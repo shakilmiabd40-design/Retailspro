@@ -118,5 +118,11 @@ function readExplicitCollectedAmount(source: Record<string, unknown> | null | un
 
 /** When a flat payload and nested consignment disagree, trust the consignment's collected amount first. */
 export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
-  return readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event) ?? readPaidAmount(consignment) ?? readPaidAmount(event);
+  const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)
+    ? event.values as Record<string, unknown>
+    : null;
+  // `consignment_update` carries changed fields in `values`; prefer those over any stale
+  // top-level COD value included alongside the change metadata.
+  return readPaidAmount(values) ?? readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event) ??
+    readPaidAmount(consignment) ?? readPaidAmount(event);
 }

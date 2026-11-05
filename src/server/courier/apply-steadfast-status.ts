@@ -18,6 +18,8 @@ export interface SteadfastStatusPayload {
   updated_at?: unknown;
   /** Some responses wrap the parcel fields in a `consignment` object. */
   consignment?: unknown;
+  /** `consignment_update` sends changed fields (including COD) inside `values`. */
+  values?: unknown;
   [key: string]: unknown;
 }
 
@@ -29,6 +31,8 @@ export interface ApplyResult {
   /** The order's status after applying the event. */
   orderStatus: Order["status"];
   customerPaid?: number;
+  /** COD amount explicitly reported by Steadfast; null means the payload omitted it. */
+  reportedCodAmount: number | null;
   queuedEvents: number;
   /** Set when the order status changed, so the caller can send the WhatsApp notification. */
   whatsapp?: { prev: Order; next: Order };
@@ -95,7 +99,10 @@ export async function applyStatusToOrder(
 
   // Some payloads (e.g. `consignment_update`) wrap the parcel fields in a `consignment` object.
   const consignment = event.consignment && typeof event.consignment === "object" ? (event.consignment as Record<string, unknown>) : null;
-  const field = (key: string) => event[key] ?? consignment?.[key];
+  const values = event.values && typeof event.values === "object" && !Array.isArray(event.values)
+    ? event.values as Record<string, unknown>
+    : null;
+  const field = (key: string) => values?.[key] ?? event[key] ?? consignment?.[key];
 
   const rawStatus = normalizeSteadfastStatus(field("status"));
   const mapped = mapSteadfastStatus(rawStatus);
@@ -170,7 +177,7 @@ export async function applyStatusToOrder(
     last?.label === label &&
     sameStatusDetail;
 
-  if (nothingNew) return { found: true, changed: false, orderStatus: order.status, customerPaid: order.delivery.customerPaid, queuedEvents: 0 };
+  if (nothingNew) return { found: true, changed: false, orderStatus: order.status, customerPaid: order.delivery.customerPaid, reportedCodAmount: cod, queuedEvents: 0 };
 
   order.activity = [...order.activity, { id: crypto.randomUUID(), at: now, label, detail, by: "Steadfast" }];
   order.updatedAt = now;
@@ -196,13 +203,13 @@ export async function applyStatusToOrder(
       source: "Steadfast",
       read: false,
     };
-    const { rows: notificationRows } = await client.query<{ data: { updates?: unknown[] } }>("select data from app_documents where key='order_notifications' for update");
+    const { rows: notificationRows } = await client.query<{ data: { updates?: unknown[]; newOrders?: unknown[] } }>("select data from app_documents where key='order_notifications' for update");
     const current = notificationRows[0]?.data ?? { updates: [] };
     const updates = [...(current.updates ?? []), notification].slice(-200);
     await client.query(
       `insert into app_documents(key,data,updated_by) values('order_notifications',$1::jsonb,$2)
        on conflict(key) do update set data=excluded.data,version=app_documents.version+1,updated_at=now(),updated_by=excluded.updated_by`,
-      [JSON.stringify({ updates }), updatedBy]
+      [JSON.stringify({ ...current, updates }), updatedBy]
     );
     await bumpRev(client, "order_notifications");
   }
@@ -255,6 +262,7 @@ export async function applyStatusToOrder(
     changed: true,
     orderStatus: order.status,
     customerPaid: order.delivery.customerPaid,
+    reportedCodAmount: cod,
     queuedEvents,
     whatsapp: prev.status !== order.status ? { prev, next: JSON.parse(JSON.stringify(order)) } : undefined,
   };

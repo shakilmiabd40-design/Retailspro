@@ -141,12 +141,17 @@ export async function POST(req: NextRequest) {
     event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment)
       ? (event.consignment as Record<string, unknown>)
       : null;
-  const invoice = text(event.invoice) || text(consignment?.invoice);
+  const values = event.values && typeof event.values === "object" && !Array.isArray(event.values)
+    ? (event.values as Record<string, unknown>)
+    : null;
+  const invoice = text(event.invoice) || text(consignment?.invoice) || text(values?.invoice);
   const consignmentId =
     text(event.consignment_id) ||
     text(consignment?.consignment_id) ||
     text(consignment?.consignmentId) ||
-    text(consignment?.id);
+    text(consignment?.id) ||
+    text(values?.consignment_id) ||
+    text(values?.consignmentId);
   if (!invoice && !consignmentId) {
     console.error("[steadfast] webhook had neither invoice nor consignment_id:", rawBody.slice(0, 500));
     return NextResponse.json({ status: "received" });
@@ -174,7 +179,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(
-      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? "—")} → ${result.changed ? "updated" : "no change"}` +
+      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? values?.status ?? "—")} cod=${String(result.reportedCodAmount ?? "—")} → ${result.changed ? "updated" : "no change"}` +
         (result.queuedEvents ? `, ${result.queuedEvents} webhook event(s) queued` : "")
     );
   } catch (err) {

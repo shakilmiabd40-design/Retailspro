@@ -68,5 +68,6 @@ export const POST = route(async (req) => {
     orderId: found.id,
     orderStatus: result.orderStatus,
     customerPaid: result.customerPaid,
+    reportedCodAmount: result.reportedCodAmount,
   });
 });

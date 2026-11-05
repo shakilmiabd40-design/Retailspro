@@ -77,8 +77,14 @@ export default function OrderDetailsPage() {
     if (!order || syncingCourier) return;
     setSyncingCourier(true);
     try {
-      const result = await api<{ changed: boolean; customerPaid?: number; status?: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
-      showToast(result.changed ? `Steadfast COD synced: ${formatTaka(result.customerPaid ?? 0, 2)}` : `Steadfast COD is up to date: ${formatTaka(result.customerPaid ?? order.delivery.customerPaid, 2)}`, "success");
+      const result = await api<{ changed: boolean; customerPaid?: number; reportedCodAmount: number | null; status?: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
+      if (result.reportedCodAmount === null) {
+        showToast("Steadfast did not return a COD amount; Customer Paid was not checked.", "error");
+      } else if (result.changed) {
+        showToast(`Steadfast COD synced: ${formatTaka(result.customerPaid ?? result.reportedCodAmount, 2)}`, "success");
+      } else {
+        showToast(`RetailsPro matches Steadfast: ${formatTaka(result.reportedCodAmount, 2)}`, "success");
+      }
     } catch (error) {
       showToast(`Steadfast sync failed: ${error instanceof Error ? error.message : "please try again"}`, "error");
     } finally {
