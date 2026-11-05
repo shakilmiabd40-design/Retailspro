@@ -209,6 +209,31 @@ export async function createApiOrder(req: NextRequest, key: ApiKeyAuth, input: C
     await client.query("insert into app_records (collection, id, data, updated_by) values ('orders', $1, $2::jsonb, $3)", [order.id, JSON.stringify(order), actor]);
     await bumpRev(client, "orders");
 
+    // Keep API-created orders on the same in-app notification path as dashboard-created orders.
+    const prefRows = await client.query(
+      "select data->'notifications'->'events'->'newOrder' as pref from app_documents where key='settings'"
+    );
+    const newOrderPref = prefRows.rows[0]?.pref as { enabled?: boolean; inApp?: boolean; roleIds?: string[] } | undefined;
+    if (newOrderPref?.enabled && newOrderPref.inApp && newOrderPref.roleIds?.length) {
+      const { rows: notificationRows } = await client.query("select data from app_documents where key='order_notifications' for update");
+      const current = notificationRows[0]?.data ?? { updates: [], newOrders: [] };
+      const newOrders = [...(current.newOrders ?? []), {
+        id: `new_order:${order.id}`,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        timestamp: now,
+        read: false,
+        roleIds: newOrderPref.roleIds,
+      }].slice(-200);
+      await client.query(
+        `insert into app_documents(key,data,updated_by) values('order_notifications',$1::jsonb,$2)
+         on conflict(key) do update set data=excluded.data,version=app_documents.version+1,updated_at=now(),updated_by=excluded.updated_by`,
+        [JSON.stringify({ ...current, updates: current.updates ?? [], newOrders }), actor]
+      );
+      await bumpRev(client, "order_notifications");
+    }
+
     // 5) Events + audit, in the same transaction.
     const events: DomainEvent[] = [...orderEvents(null, order)];
     for (const p of after) events.push(...productEvents(before.get(p.id), p));

@@ -97,7 +97,7 @@ Unacknowledged notifications escalate after 30 min (Critical), 60 min (Out of St
 
 `open` → `acknowledged` → `resolved`. Available actions (store methods): `acknowledge`, `assign` (role + optional name), `resolve`, `markRead`, `clearResolved`. Info-level notifications never raise the unread badge; warning and critical ones do.
 
-New-order in-app alerts and email are controlled by **Settings → Notifications → New order created**. In-app alerts are stored transactionally with newly created orders and shown to the selected roles under the Notifications → New orders tab. When enabled with Email selected, the server sends one message to active users in the selected roles for each newly created order. A database uniqueness claim prevents duplicate mail when sync retries; failed sends release the claim so a later retry can deliver. Email requires `GMAIL_USER` and `GMAIL_APP_PASSWORD` to be configured on the server.
+New-order in-app alerts and email are controlled by **Settings → Notifications → New order created**. In-app alerts are stored transactionally with newly created dashboard or public API orders and shown to the selected roles under the Notifications → New orders tab. When enabled with Email selected, the server sends one message to active users in the selected roles for each newly created order. A database uniqueness claim prevents duplicate mail when sync retries; failed sends release the claim so a later retry can deliver. Email requires `GMAIL_USER` and `GMAIL_APP_PASSWORD` to be configured on the server. Skip and failure reasons are logged under `[notifications]` in the server logs.
 
 ## Extending it
 

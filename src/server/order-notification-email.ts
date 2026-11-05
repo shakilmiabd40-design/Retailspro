@@ -14,13 +14,25 @@ export async function sendNewOrderNotificationEmail(order: Order): Promise<void>
     "select data->'notifications'->'events'->'newOrder' as pref from app_documents where key = 'settings'"
   );
   const pref = settings.rows[0]?.pref;
-  if (!pref?.enabled || !pref.email || !pref.roleIds?.length) return;
+  if (!pref?.enabled || !pref.email || !pref.roleIds?.length) {
+    console.info("[notifications] new-order email skipped", {
+      orderId: order.id,
+      reason: !pref?.enabled ? "event_disabled" : !pref.email ? "email_channel_disabled" : "no_roles_selected",
+    });
+    return;
+  }
   const users = await query<{ email: string }>("select email from app_users where status = 'active' and role_id = any($1::text[])", [pref.roleIds]);
   const recipients = [...new Set(users.rows.map((u) => u.email.trim()).filter(isEmail))];
-  if (!recipients.length) return;
+  if (!recipients.length) {
+    console.info("[notifications] new-order email skipped", { orderId: order.id, reason: "no_active_recipient_emails" });
+    return;
+  }
 
   const claim = await query("insert into app_sent_notification_emails (notification_id) values ($1) on conflict do nothing returning notification_id", [notificationId]);
-  if (!claim.rows.length) return;
+  if (!claim.rows.length) {
+    console.info("[notifications] new-order email skipped", { orderId: order.id, reason: "already_sent" });
+    return;
+  }
 
   const shopName = await getShopName();
   const itemLines = order.items.map((item) => `${item.qty} × ${item.productName}${item.color || item.size ? ` (${[item.color, item.size].filter(Boolean).join(" / ")})` : ""}`).join("\n");

@@ -305,7 +305,7 @@ export const POST = route(async (req) => {
   }
 
   if (newOrderNotifications.length) {
-    after(() => Promise.all(newOrderNotifications.map((order) => sendNewOrderNotificationEmail(order))));
+    after(() => Promise.all(newOrderNotifications.map((order) => sendNewOrderNotificationEmail(order))).catch((e) => console.error("[notifications] new-order email handler failed", e)));
   }
 
   return json({ ok: true, versions, documents: docVersions, revs });

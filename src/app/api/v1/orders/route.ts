@@ -5,6 +5,7 @@ import { authenticateApiKey } from "@/server/publicapi/apikeys";
 import { createApiOrder, normalizeBdPhone, parseCreateOrder } from "@/server/publicapi/orders";
 import { toApiOrder } from "@/server/publicapi/serialize";
 import { deliverDue } from "@/server/publicapi/webhooks";
+import { sendNewOrderNotificationEmail } from "@/server/order-notification-email";
 import type { Order } from "@/lib/orders/types";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,9 @@ export const POST = apiRoute(async (req) => {
   const key = await authenticateApiKey(req, "orders:write");
   const input = parseCreateOrder(await readBody(req));
   const { order, duplicate } = await createApiOrder(req, key, input);
-  if (!duplicate) after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+  if (!duplicate) {
+    after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+    after(() => sendNewOrderNotificationEmail(order).catch((e) => console.error("[notifications] new-order email handler failed", e)));
+  }
   return ok(toApiOrder(order), { duplicate }, { status: duplicate ? 200 : 201, headers: duplicate ? { "Idempotent-Replayed": "true" } : undefined });
 });
