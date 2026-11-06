@@ -23,11 +23,17 @@ export function parseContactDetails(value: string): ParsedContactDetails {
   for (const line of lines) {
     const nameMatch = line.match(/^(?:(?:customer\s*)?name|নাম)\s*[:=：\-]\s*(.+)$/i);
     if (nameMatch) {
-      name = nameMatch[1].trim();
+      let nameValue = nameMatch[1].trim();
+      const phoneInName = nameValue.match(phonePattern);
+      if (phoneInName) {
+        phone ??= phoneInName[0].replace(/[\s.-]/g, "");
+        nameValue = nameValue.replace(phoneInName[0], " ").replace(/\s+/g, " ").trim();
+      }
+      name = nameValue || name;
       continue;
     }
-    const phoneMatch = line.match(/^(?:mobile|phone|contact|cell)\s*(?:number)?\s*[:=：\-]\s*(.+)$/i)
-      ?? line.match(/^(?:ফোন|মোবাইল)\s*[:=：\-]\s*(.+)$/);
+    const phoneMatch = line.match(/^(?:mobile|phone|contact|cell|number|no\.?)\s*(?:number)?\s*[:=：\-]\s*(.+)$/i)
+      ?? line.match(/^(?:ফোন|মোবাইল|নম্বর)\s*[:=：\-]\s*(.+)$/);
     if (phoneMatch) {
       const digits = phoneMatch[1].replace(/[^\d+]/g, "");
       if (digits.replace(/\D/g, "").length >= 7) phone = digits;
