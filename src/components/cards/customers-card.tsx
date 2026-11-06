@@ -6,7 +6,7 @@ import type { CustomersKpi } from "@/lib/types";
 export function CustomersCard({ data }: { data: CustomersKpi }) {
   return (
     <div
-      className="flex flex-col rounded-2xl border p-5"
+      className="flex h-full flex-col rounded-2xl border p-5"
       style={{ background: "var(--brand-tint-bg)", borderColor: "var(--brand-tint-border)" }}
     >
       <div className="mb-1 flex items-start justify-between">

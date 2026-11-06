@@ -101,6 +101,7 @@ export type DashboardData = {
   revenue: RevenueKpi;
   topCategories: Record<RangeKey, TopCategory[]>;
   salesChart: OrdersChartPoint[];
+  salesChartGroup: "daily" | "weekly" | "monthly";
   topDistricts: Record<RangeKey, DistrictShare[]>;
   products: ProductSalesRow[];
   recentOrders: RecentOrderRow[];

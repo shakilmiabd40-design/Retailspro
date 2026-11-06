@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Menu, Search, X, Package, ShoppingCart, Truck } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Menu, Search, X, Package, ShoppingCart, Truck, SlidersHorizontal } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notifications/notification-bell";
 import { UserMenu } from "./user-menu";
@@ -12,6 +12,7 @@ import { api } from "@/lib/persist/api";
 
 export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<{
@@ -228,6 +229,15 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
         <SyncStatus />
 
         <ThemeToggle />
+
+        {pathname === "/" && <button
+          type="button"
+          aria-label="Customize dashboard"
+          title="Customize dashboard"
+          onClick={() => window.dispatchEvent(new Event("retailspro:toggle-dashboard-customizer"))}
+          className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border"
+          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+        ><SlidersHorizontal size={16} /></button>}
 
         <NotificationBell />
 

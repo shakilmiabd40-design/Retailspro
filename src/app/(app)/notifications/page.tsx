@@ -14,14 +14,13 @@ import { useAccess } from "@/lib/settings/access";
 type Tab = "alerts" | "board" | "courier" | "orders";
 type StateFilter = "active" | "resolved" | "all";
 
-const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
 const STATUS_ORDER: InventoryStatus[] = ["out_of_stock", "critical", "replenish", "hold_blocked", "in_progress", "monitor", "on_target"];
 const TILE_STATUSES: InventoryStatus[] = ["out_of_stock", "critical", "replenish", "monitor", "in_progress", "hold_blocked"];
 
 const selectStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 
 export default function NotificationsPage() {
-  const { notifications, orderUpdates, newOrders, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, markNewOrderRead, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
+  const { notifications, orderUpdates, newOrders, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, markNewOrderRead, deleteNotification, deleteOrderUpdate, deleteNewOrder, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
   const { currentRole } = useAccess();
   const showToast = useToast();
 
@@ -41,11 +40,7 @@ export default function NotificationsPage() {
         .filter((n) => statusFilter === "all" || n.status === statusFilter)
         .filter((n) => severityFilter === "all" || n.severity === severityFilter)
         .filter((n) => matchesQuery(n.productName, n.sku))
-        .sort((a, b) =>
-          stateFilter === "active"
-            ? SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.timestamp.localeCompare(a.timestamp)
-            : b.timestamp.localeCompare(a.timestamp)
-        ),
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [notifications, stateFilter, statusFilter, severityFilter, q]
   );
@@ -67,7 +62,8 @@ export default function NotificationsPage() {
     [board, statusFilter, q]
   );
 
-  const routedOrders = newOrders.filter((n) => n.roleIds.includes(currentRole.id));
+  const routedOrders = newOrders.filter((n) => n.roleIds.includes(currentRole.id)).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const latestOrderUpdates = [...orderUpdates].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   const activeCount = notifications.filter((n) => n.state !== "resolved").length + orderUpdates.filter((n) => !n.read).length + routedOrders.filter((n) => !n.read).length;
   const unackCount = notifications.filter((n) => n.state === "open").length + orderUpdates.filter((n) => !n.read).length + routedOrders.filter((n) => !n.read).length;
   const hasResolved = notifications.some((n) => n.state === "resolved");
@@ -216,18 +212,18 @@ export default function NotificationsPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[620px] border-collapse text-left text-[13px]">
                 <thead><tr className="text-[11.5px]" style={{ color: "var(--text-faint)", background: "var(--surface-2)" }}><th className="px-4 py-2.5">Order</th><th className="px-4 py-2.5">Customer</th><th className="px-4 py-2.5">When</th><th className="px-4 py-2.5" /></tr></thead>
-                <tbody>{routedOrders.filter((order) => !q || order.orderNumber.toLowerCase().includes(q) || order.customerName.toLowerCase().includes(q)).map((order) => <tr key={order.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}><td className="px-4 py-3"><Link href={`/orders/${order.orderId}`} className="font-medium hover:underline" style={{ color: "var(--brand)" }}>#{order.orderNumber}</Link>{!order.read && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>New</span>}</td><td className="px-4 py-3" style={{ color: "var(--text-muted)" }}>{order.customerName}</td><td className="whitespace-nowrap px-4 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>{timeAgo(order.timestamp)}</td><td className="px-4 py-3 text-right">{!order.read && <button onClick={() => markNewOrderRead(order.id)} className="rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text)" }}>Mark read</button>}</td></tr>)}</tbody>
+                <tbody>{routedOrders.filter((order) => !q || order.orderNumber.toLowerCase().includes(q) || order.customerName.toLowerCase().includes(q)).map((order) => <tr key={order.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}><td className="px-4 py-3"><Link href={`/orders/${order.orderId}`} className="font-medium hover:underline" style={{ color: "var(--brand)" }}>#{order.orderNumber}</Link>{!order.read && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>New</span>}</td><td className="px-4 py-3" style={{ color: "var(--text-muted)" }}>{order.customerName}</td><td className="whitespace-nowrap px-4 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>{timeAgo(order.timestamp)}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-2">{!order.read && <button onClick={() => markNewOrderRead(order.id)} className="rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text)" }}>Mark read</button>}<button aria-label="Delete notification" title="Delete notification" onClick={() => deleteNewOrder(order.id)} className="rounded-lg border p-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}><Trash2 size={13} /></button></div></td></tr>)}</tbody>
               </table>
             </div>
           )
         ) : tab === "courier" ? (
-          orderUpdates.filter((update) => !q || update.orderNumber.toLowerCase().includes(q)).length === 0 ? (
+          latestOrderUpdates.filter((update) => !q || update.orderNumber.toLowerCase().includes(q)).length === 0 ? (
             <p className="px-4 py-14 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>No courier COD updates.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[680px] border-collapse text-left text-[13px]">
                 <thead><tr className="text-[11.5px]" style={{ color: "var(--text-faint)", background: "var(--surface-2)" }}><th className="px-4 py-2.5">Order</th><th className="px-4 py-2.5">Previous COD</th><th className="px-4 py-2.5">Courier reported</th><th className="px-4 py-2.5">When</th><th className="px-4 py-2.5" /></tr></thead>
-                <tbody>{orderUpdates.filter((update) => !q || update.orderNumber.toLowerCase().includes(q)).map((update) => <tr key={update.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}><td className="px-4 py-3"><Link href={`/orders/${update.orderId}`} className="font-medium hover:underline" style={{ color: "var(--brand)" }}>#{update.orderNumber}</Link>{!update.read && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>New</span>}<p className="text-[11px]" style={{ color: "var(--text-faint)" }}>{update.source}</p></td><td className="px-4 py-3 tabular-nums" style={{ color: "var(--text-muted)" }}>৳{update.previousAmount.toLocaleString()}</td><td className="px-4 py-3 font-semibold tabular-nums" style={{ color: "var(--text)" }}>৳{update.currentAmount.toLocaleString()}</td><td className="whitespace-nowrap px-4 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>{timeAgo(update.timestamp)}</td><td className="px-4 py-3 text-right">{!update.read && <button onClick={() => markOrderUpdateRead(update.id)} className="rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text)" }}>Mark read</button>}</td></tr>)}</tbody>
+                <tbody>{latestOrderUpdates.filter((update) => !q || update.orderNumber.toLowerCase().includes(q)).map((update) => <tr key={update.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}><td className="px-4 py-3"><Link href={`/orders/${update.orderId}`} className="font-medium hover:underline" style={{ color: "var(--brand)" }}>#{update.orderNumber}</Link>{!update.read && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>New</span>}<p className="text-[11px]" style={{ color: "var(--text-faint)" }}>{update.source}</p></td><td className="px-4 py-3 tabular-nums" style={{ color: "var(--text-muted)" }}>৳{update.previousAmount.toLocaleString()}</td><td className="px-4 py-3 font-semibold tabular-nums" style={{ color: "var(--text)" }}>৳{update.currentAmount.toLocaleString()}</td><td className="whitespace-nowrap px-4 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>{timeAgo(update.timestamp)}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-2">{!update.read && <button onClick={() => markOrderUpdateRead(update.id)} className="rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text)" }}>Mark read</button>}<button aria-label="Delete notification" title="Delete notification" onClick={() => deleteOrderUpdate(update.id)} className="rounded-lg border p-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}><Trash2 size={13} /></button></div></td></tr>)}</tbody>
               </table>
             </div>
           )
@@ -287,7 +283,7 @@ export default function NotificationsPage() {
                         {timeAgo(n.timestamp)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {n.state === "open" ? (
+                        <div className="flex justify-end gap-2">{n.state === "open" ? (
                           <button
                             onClick={() => {
                               acknowledge(n.id);
@@ -302,7 +298,7 @@ export default function NotificationsPage() {
                           <Link href={`/notifications/${n.id}`} className="focus-ring rounded-md text-[12px] font-medium" style={{ color: "var(--brand)" }}>
                             View
                           </Link>
-                        )}
+                        )}<button aria-label="Delete notification" title="Delete notification" onClick={() => deleteNotification(n.id)} className="rounded-lg border p-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}><Trash2 size={13} /></button></div>
                       </td>
                     </tr>
                   ))}

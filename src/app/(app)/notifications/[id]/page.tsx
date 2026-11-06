@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Check, CheckCheck, Copy, ExternalLink, PackagePlus } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, Copy, ExternalLink, PackagePlus, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useNotifications } from "@/lib/notifications/store";
 import { CHANNEL_LABELS, OWNER_ROLE_LABELS, RESOLUTION_LABELS, STATUS_LABELS, toPayload } from "@/lib/notifications/engine";
 import type { OwnerRole } from "@/lib/notifications/types";
@@ -31,8 +32,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default function NotificationDetailPage() {
   const params = useParams<{ id: string }>();
-  const { getNotification, hydrated, historyFor, linkedPurchaseOrders, acknowledge, resolve, assign, markRead } = useNotifications();
+  const { getNotification, hydrated, historyFor, linkedPurchaseOrders, acknowledge, resolve, assign, markRead, deleteNotification } = useNotifications();
   const showToast = useToast();
+  const router = useRouter();
   const n = getNotification(params.id);
 
   const [role, setRole] = useState<OwnerRole | null>(null);
@@ -104,6 +106,18 @@ export default function NotificationDetailPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              deleteNotification(n.id);
+              showToast("Notification deleted");
+              router.push("/notifications");
+            }}
+            className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"
+            style={{ borderColor: "var(--border)", color: "var(--red)" }}
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
           {canCreatePo && (
             <Link href={poHref} className="focus-ring flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: "var(--brand)" }}>
               <PackagePlus size={14} />

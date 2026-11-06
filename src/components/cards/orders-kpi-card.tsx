@@ -8,7 +8,7 @@ import type { OrdersKpi } from "@/lib/types";
 
 export function OrdersKpiCard({ data }: { data: OrdersKpi }) {
   return (
-    <div className="card flex flex-col p-5">
+    <div className="card flex h-full flex-col p-5">
       <div className="mb-1 flex items-start justify-between">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
           {data.periodLabel ? `Orders · ${data.periodLabel}` : "Orders · Last 30 Days"}

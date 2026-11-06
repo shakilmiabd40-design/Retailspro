@@ -8,10 +8,12 @@ import type { RevenueKpi } from "@/lib/types";
 
 export function RevenueCard({ data }: { data: RevenueKpi }) {
   return (
-    <div className="card flex flex-col p-5">
+    <div className="card flex h-full flex-col p-5">
       <div className="mb-1 flex items-start justify-between">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
-          {data.periodLabel ? `Net Revenue · ${data.periodLabel}` : "Net Revenue · Last 30 Days"}
+          <span title="Delivered product sales after discounts plus delivery billed, minus courier costs.">
+            {data.periodLabel ? `Sales · ${data.periodLabel}` : "Sales · Last 30 Days"}
+          </span>
         </p>
         <Wallet size={16} style={{ color: "var(--text-faint)" }} />
       </div>
@@ -26,7 +28,7 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
         {data.prevLabel ?? `${formatCurrency(data.prev30)} in the previous period`}
       </p>
       <p className="mt-2 text-[11px]" style={{ color: "var(--text-faint)" }}>
-        Delivered orders in period
+        Delivered orders · after courier costs
       </p>
 
       <div className="mt-2 h-20">

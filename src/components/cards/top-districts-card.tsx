@@ -10,7 +10,7 @@ export function TopDistrictsCard({ data }: { data: Record<RangeKey, DistrictShar
   const max = Math.max(...rows.map((d) => d.pct), 1);
 
   return (
-    <div className="card flex flex-col p-5">
+    <div className="card flex h-full flex-col p-5">
       <div className="mb-5">
         <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
           Top Districts

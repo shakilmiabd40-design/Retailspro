@@ -5,7 +5,7 @@ import type { ProductSalesRow } from "@/lib/types";
 
 export function ProductSalesTable({ data }: { data: ProductSalesRow[] }) {
   return (
-    <div className="card p-5">
+    <div className="card h-full p-5">
       <div className="mb-4">
         <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
           Product Sales

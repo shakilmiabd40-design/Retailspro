@@ -5,12 +5,13 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { RangeTabs } from "@/components/cards/range-tabs";
 import type { RangeKey, TopCategory } from "@/lib/types";
 
-export function TopCategoriesCard({ data }: { data: Record<RangeKey, TopCategory[]> }) {
-  const [range, setRange] = useState<RangeKey>("month");
+export function TopCategoriesCard({ data, range: controlledRange, onRangeChange }: { data: Record<RangeKey, TopCategory[]>; range?: RangeKey; onRangeChange?: (range: RangeKey) => void }) {
+  const [localRange, setLocalRange] = useState<RangeKey>("month");
+  const range = controlledRange ?? localRange;
   const categories = data[range];
 
   return (
-    <div className="card flex flex-col p-5">
+    <div className="card flex h-full flex-col p-5">
       <div className="mb-2">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
           Top Categories
@@ -65,7 +66,7 @@ export function TopCategoriesCard({ data }: { data: Record<RangeKey, TopCategory
       )}
 
       <div className="mt-4">
-        <RangeTabs value={range} onChange={setRange} />
+        <RangeTabs value={range} onChange={(next) => { setLocalRange(next); onRangeChange?.(next); }} />
       </div>
     </div>
   );

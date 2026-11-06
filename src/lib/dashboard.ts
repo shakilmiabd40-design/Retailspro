@@ -94,6 +94,7 @@ export interface DashboardDateRange {
   from: string; // YYYY-MM-DD
   to: string;   // YYYY-MM-DD
   label?: string;
+  groupBy?: "daily" | "weekly" | "monthly";
 }
 
 export function buildDashboard(
@@ -109,7 +110,17 @@ export function buildDashboard(
 
   // Range determination
   const hasCustom = !!customRange && !!customRange.from && !!customRange.to;
-  const rangeFrom = hasCustom ? startOfDay(parseLocal(customRange.from)) : addDays(today, -29);
+  const allTime = customRange?.label?.toLowerCase() === "all time";
+  const allTimeDates = allTime
+    ? [
+        ...orders.flatMap((o) => [o.createdAt, ...(o.status === "delivered" ? [o.delivery.deliveryDate ?? o.createdAt] : [])]),
+        ...invoices.map((invoice) => invoice.createdAt),
+      ].map((value) => parseLocal(value).getTime()).filter(Number.isFinite)
+    : [];
+  const earliestActivity = allTimeDates.length ? new Date(Math.min(...allTimeDates)) : null;
+  const rangeFrom = allTime && earliestActivity
+    ? startOfDay(earliestActivity)
+    : hasCustom ? startOfDay(parseLocal(customRange.from)) : addDays(today, -29);
   const rangeTo = hasCustom ? addDays(startOfDay(parseLocal(customRange.to)), 1) : tomorrow; // exclusive upper bound
   
   // Previous comparison range of equal length
@@ -198,18 +209,36 @@ export function buildDashboard(
     return { label: d.toLocaleDateString("en-US", { day: "numeric" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
   });
 
-  const chartDays = Math.min(Math.max(15, periodDays), 30);
-  const chartStart = hasCustom ? rangeFrom : addDays(today, -14);
-  const salesChart: OrdersChartPoint[] = Array.from({ length: chartDays }, (_, i) => {
-    const d = addDays(chartStart, i);
-    const k = dayKey(d);
-    return {
-      label: d.toLocaleDateString("en-US", { day: "numeric" }),
-      income: Math.round(grossByDay.get(k) ?? 0),
-      profit: Math.round(grossProfitByDay.get(k) ?? 0),
-      netProfit: Math.round(netProfitByDay.get(k) ?? 0),
-    };
-  });
+  const groupBy = customRange?.groupBy ?? (periodDays > 90 ? "monthly" : periodDays > 45 ? "weekly" : "daily");
+  const salesChart: OrdersChartPoint[] = [];
+  let bucketStart = startOfDay(rangeFrom);
+  while (bucketStart < rangeTo) {
+    let bucketEnd: Date;
+    if (groupBy === "monthly") bucketEnd = new Date(bucketStart.getFullYear(), bucketStart.getMonth() + 1, 1);
+    else if (groupBy === "weekly") bucketEnd = addDays(bucketStart, 7);
+    else bucketEnd = addDays(bucketStart, 1);
+    if (bucketEnd > rangeTo) bucketEnd = rangeTo;
+    let income = 0;
+    let profit = 0;
+    let netProfit = 0;
+    for (let day = bucketStart; day < bucketEnd; day = addDays(day, 1)) {
+      const k = dayKey(day);
+      income += grossByDay.get(k) ?? 0;
+      profit += grossProfitByDay.get(k) ?? 0;
+      netProfit += netProfitByDay.get(k) ?? 0;
+    }
+    salesChart.push({
+      label: groupBy === "monthly"
+        ? bucketStart.toLocaleDateString("en-US", { month: "short", year: "numeric" })
+        : groupBy === "weekly"
+          ? `${bucketStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${addDays(bucketEnd, -1).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+          : bucketStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      income: Math.round(income),
+      profit: Math.round(profit),
+      netProfit: Math.round(netProfit),
+    });
+    bucketStart = bucketEnd;
+  }
 
   // ---- Customers KPI ----
   const firstOrderAt = new Map<string, number>();
@@ -310,7 +339,12 @@ export function buildDashboard(
     ? orders.filter((o) => inRange(createdAt(o), rangeFrom, rangeTo))
     : orders;
   const recentOrders = [...scopedRecent]
-    .sort((a, b) => createdAt(b) - createdAt(a))
+    // The dashboard's "Recent Orders" is an activity feed: a delivery outcome
+    // updated today should outrank an order created earlier and left untouched.
+    .sort((a, b) => {
+      const latest = (order: Order) => Math.max(createdAt(order), ...order.activity.map((entry) => new Date(entry.at).getTime()).filter(Number.isFinite));
+      return latest(b) - latest(a);
+    })
     .slice(0, 5)
     .map((o) => ({
       id: o.id,
@@ -337,6 +371,7 @@ export function buildDashboard(
     revenue: { last30: revLast30, prev30: revPrev30, trend: pctTrend(revLast30, revPrev30), last7Days: revenueSpark, periodLabel, prevLabel },
     topCategories,
     salesChart,
+    salesChartGroup: groupBy,
     topDistricts,
     products: productRows,
     recentOrders,

@@ -46,18 +46,18 @@ function CustomTooltip({
   );
 }
 
-export function OrdersChartCard({ data }: { data: OrdersChartPoint[] }) {
+export function OrdersChartCard({ data, periodLabel = "selected period", groupBy = "daily" }: { data: OrdersChartPoint[]; periodLabel?: string; groupBy?: "daily" | "weekly" | "monthly" }) {
   const hasData = data.some((d) => d.income > 0 || d.profit > 0 || d.netProfit !== 0);
 
   return (
-    <div className="card p-5">
+    <div className="card h-full p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
-            Sales &amp; Profit
+            Sales &amp; Profit · {periodLabel}
           </p>
           <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-            Delivered orders, last 15 days · gross profit = sales − product cost · net profit = gross profit − courier cost − expenses
+            {groupBy[0].toUpperCase() + groupBy.slice(1)} totals · gross profit = sales − product cost · net profit = gross profit − courier cost − expenses
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -94,7 +94,7 @@ export function OrdersChartCard({ data }: { data: OrdersChartPoint[] }) {
         </ResponsiveContainer>
         {!hasData && (
           <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12.5px]" style={{ color: "var(--text-muted)" }}>
-            No delivered orders in the last 15 days.
+            No delivered orders in this period.
           </p>
         )}
       </div>

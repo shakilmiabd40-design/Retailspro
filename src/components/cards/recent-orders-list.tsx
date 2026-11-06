@@ -9,7 +9,7 @@ import type { RecentOrderRow } from "@/lib/types";
 
 export function RecentOrdersList({ data }: { data: RecentOrderRow[] }) {
   return (
-    <div className="card p-5">
+    <div className="card h-full p-5">
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
           Recent Orders

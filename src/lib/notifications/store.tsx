@@ -59,6 +59,9 @@ interface NotificationsContextValue {
   markAllRead: () => void;
   markOrderUpdateRead: (id: string) => void;
   markNewOrderRead: (id: string) => void;
+  deleteNotification: (id: string) => void;
+  deleteOrderUpdate: (id: string) => void;
+  deleteNewOrder: (id: string) => void;
   acknowledge: (id: string) => void;
   acknowledgeAll: () => void;
   assign: (id: string, input: { ownerRole: OwnerRole; assignee?: string }) => void;
@@ -233,6 +236,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       },
       markOrderUpdateRead: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.id === id ? { ...n, read: true } : n) })),
       markNewOrderRead: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).map((n) => n.id === id ? { ...n, read: true } : n) })),
+      deleteNotification: (id) => setData((prev) => ({ ...prev, notifications: prev.notifications.filter((n) => n.id !== id) })),
+      deleteOrderUpdate: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.filter((n) => n.id !== id) })),
+      deleteNewOrder: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).filter((n) => n.id !== id) })),
       acknowledge: (id) =>
         patchOne(id, (n, now) =>
           n.state !== "open" ? n : { ...n, state: "acknowledged", read: true, acknowledgedAt: now, activity: log(n, now, "Acknowledged", `By ${ACTOR}`) }

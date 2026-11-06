@@ -3,21 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import { Bell, Trash2 } from "lucide-react";
 import { useNotifications } from "@/lib/notifications/store";
 import { timeAgo } from "@/lib/dashboard";
 import { InventoryStatusBadge } from "./badges";
 import { useAccess } from "@/lib/settings/access";
 import type { InventoryNotification, NewOrderNotification, OrderCodUpdate } from "@/lib/notifications/types";
 
-const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 } as const;
 type BellItem =
-  | { kind: "stock"; data: InventoryNotification; rank: number }
-  | { kind: "courier"; data: OrderCodUpdate; rank: number }
-  | { kind: "order"; data: NewOrderNotification; rank: number };
+  | { kind: "stock"; data: InventoryNotification }
+  | { kind: "courier"; data: OrderCodUpdate }
+  | { kind: "order"; data: NewOrderNotification };
 
 export function NotificationBell() {
-  const { notifications, orderUpdates, newOrders, unreadCount, markRead, markAllRead, markOrderUpdateRead, markNewOrderRead } = useNotifications();
+  const { notifications, orderUpdates, newOrders, unreadCount, markRead, markAllRead, markOrderUpdateRead, markNewOrderRead, deleteNotification, deleteOrderUpdate, deleteNewOrder } = useNotifications();
   const { currentRole } = useAccess();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,12 +40,12 @@ export function NotificationBell() {
   const items: BellItem[] = [
     ...notifications
       .filter((n) => !n.read || n.state !== "resolved")
-      .map((n) => ({ kind: "stock" as const, data: n, rank: SEVERITY_RANK[n.severity] })),
-    ...orderUpdates.filter((n) => !n.read).map((n) => ({ kind: "courier" as const, data: n, rank: 0 })),
+      .map((n) => ({ kind: "stock" as const, data: n })),
+    ...orderUpdates.filter((n) => !n.read).map((n) => ({ kind: "courier" as const, data: n })),
     ...newOrders
       .filter((n) => !n.read && n.roleIds.includes(currentRole.id))
-      .map((n) => ({ kind: "order" as const, data: n, rank: 0 })),
-  ].sort((a, b) => a.rank - b.rank || b.data.timestamp.localeCompare(a.data.timestamp)).slice(0, 6);
+      .map((n) => ({ kind: "order" as const, data: n })),
+  ].sort((a, b) => b.data.timestamp.localeCompare(a.data.timestamp)).slice(0, 6);
 
   return (
     <div ref={rootRef} className="relative">
@@ -103,7 +102,7 @@ export function NotificationBell() {
                     ? item.data.customerName
                     : `COD changed to ৳${item.data.currentAmount.toLocaleString()}`;
                 return (
-                  <button
+                  <div
                     key={`${item.kind}:${item.data.id}`}
                     onClick={() => {
                       if (item.kind === "stock") {
@@ -117,7 +116,10 @@ export function NotificationBell() {
                         router.push(`/orders/${item.data.orderId}`);
                       }
                     }}
-                    className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--surface-2)]"
+                    onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); event.currentTarget.click(); } }}
+                    role="button"
+                    tabIndex={0}
+                    className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--surface-2)]"
                   >
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: item.data.read ? "transparent" : "var(--brand)" }} />
                     <span className="min-w-0 flex-1">
@@ -134,7 +136,20 @@ export function NotificationBell() {
                         {detail}
                       </span>
                     </span>
-                  </button>
+                    <button
+                      type="button"
+                      aria-label="Delete notification"
+                      title="Delete notification"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (item.kind === "stock") deleteNotification(item.data.id);
+                        else if (item.kind === "order") deleteNewOrder(item.data.id);
+                        else deleteOrderUpdate(item.data.id);
+                      }}
+                      className="rounded-lg border p-1.5"
+                      style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+                    ><Trash2 size={13} /></button>
+                  </div>
                 );
               })}
             </div>
