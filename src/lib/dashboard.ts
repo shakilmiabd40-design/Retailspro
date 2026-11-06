@@ -149,12 +149,12 @@ export function buildDashboard(
     const k = dayKey(new Date(o.createdAt));
     ordersByDay.set(k, (ordersByDay.get(k) ?? 0) + 1);
   }
-  // Sparkline: if custom range is small (<= 14 days), show each day of the range; otherwise last 7 days of the range
-  const sparkDays = Math.min(Math.max(7, periodDays), 14);
-  const sparkStart = hasCustom ? rangeFrom : addDays(today, -6);
+  // Keep KPI sparklines anchored to the end of the selected range, even on ranges longer than 14 days.
+  const sparkDays = Math.min(Math.max(1, periodDays), 14);
+  const sparkStart = addDays(rangeTo, -sparkDays);
   const ordersSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
     const d = addDays(sparkStart, i);
-    return { label: d.toLocaleDateString("en-US", { day: "numeric" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
+    return { label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), value: ordersByDay.get(dayKey(d)) ?? 0 };
   });
 
   // ---- Net revenue KPI + sales chart (delivered online orders + POS walk-in sales; product sales + delivery billed − courier cost) ----
@@ -206,7 +206,7 @@ export function buildDashboard(
   }
   const revenueSpark: SparkPoint[] = Array.from({ length: sparkDays }, (_, i) => {
     const d = addDays(sparkStart, i);
-    return { label: d.toLocaleDateString("en-US", { day: "numeric" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
+    return { label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), value: revenueByDay.get(dayKey(d)) ?? 0 };
   });
 
   const groupBy = customRange?.groupBy ?? (periodDays > 90 ? "monthly" : periodDays > 45 ? "weekly" : "daily");
@@ -339,12 +339,7 @@ export function buildDashboard(
     ? orders.filter((o) => inRange(createdAt(o), rangeFrom, rangeTo))
     : orders;
   const recentOrders = [...scopedRecent]
-    // The dashboard's "Recent Orders" is an activity feed: a delivery outcome
-    // updated today should outrank an order created earlier and left untouched.
-    .sort((a, b) => {
-      const latest = (order: Order) => Math.max(createdAt(order), ...order.activity.map((entry) => new Date(entry.at).getTime()).filter(Number.isFinite));
-      return latest(b) - latest(a);
-    })
+    .sort((a, b) => createdAt(b) - createdAt(a))
     .slice(0, 5)
     .map((o) => ({
       id: o.id,

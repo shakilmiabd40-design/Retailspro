@@ -96,6 +96,18 @@ export default function DashboardPage() {
     return () => { current = false; clearInterval(interval); };
   }, [from, to, dateRange.label]);
 
+  // Relative presets follow the shop's local calendar date while the dashboard stays open.
+  useEffect(() => {
+    if (preset === "custom") return;
+    const updateRelativeRange = () => {
+      const next = presetRange(preset);
+      setFrom((current) => current === next.from ? current : next.from);
+      setTo((current) => current === next.to ? current : next.to);
+    };
+    const timer = setInterval(updateRelativeRange, 60_000);
+    return () => clearInterval(timer);
+  }, [preset]);
+
   function handlePreset(p: PresetKey) {
     setPreset(p);
     const r = presetRange(p);

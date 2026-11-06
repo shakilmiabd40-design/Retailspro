@@ -146,7 +146,7 @@ export function readLatestRiderTrackingMessage(raw: unknown): string | null {
   return notes.at(-1)?.message ?? null;
 }
 
-/** Prefer explicit collected figures, then a rider note, then COD values that may still be stale. */
+/** Prefer explicit collected figures, then an explicit rider-note taka amount, then COD fields. */
 export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
   const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)
     ? event.values as Record<string, unknown>
@@ -156,9 +156,9 @@ export function readCourierPaidAmount(event: Record<string, unknown> | null | un
   // top-level COD value included alongside the change metadata.
   const collected = readExplicitCollectedAmount(values) ?? readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event);
   if (collected !== null) return collected;
-  const changedCod = readPaidAmount(values);
-  if (changedCod !== null) return changedCod;
   const riderNote = readRiderNoteAmount(trackingMessage);
   if (riderNote !== null) return riderNote;
+  const changedCod = readPaidAmount(values);
+  if (changedCod !== null) return changedCod;
   return readPaidAmount(consignment) ?? readPaidAmount(event);
 }

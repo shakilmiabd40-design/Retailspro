@@ -61,9 +61,8 @@ export function OrdersKpiCard({ data }: { data: OrdersKpi }) {
         </ResponsiveContainer>
       </div>
       <div className="mt-1 flex justify-between text-[11px]" style={{ color: "var(--text-faint)" }}>
-        {data.sparkline.map((p, i) => (
-          <span key={i}>{p.label}</span>
-        ))}
+        <span>{data.sparkline[0]?.label}</span>
+        <span>{data.sparkline.at(-1)?.label}</span>
       </div>
     </div>
   );

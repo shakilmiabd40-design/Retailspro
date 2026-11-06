@@ -48,10 +48,11 @@ export const POST = route(async (req) => {
     : await getSteadfastConsignmentByInvoice(orderNumber);
   if (!remote.ok) throw new ApiError(502, "steadfast_error", remote.error);
 
-  // The status lookup only reports a status code and delivery status. For partial deliveries,
-  // also read tracking history because the rider's actual collection amount is recorded in its note.
+  // The status lookup only reports a status code and delivery status. For delivered and partial
+  // deliveries, also read tracking history because the rider's actual collection can be in its note.
   let statusPayload = remote.data;
-  if (normalizeSteadfastStatus(remote.data.status).startsWith("partial_delivered")) {
+  const remoteStatus = normalizeSteadfastStatus(remote.data.status);
+  if (remoteStatus === "delivered" || remoteStatus.startsWith("partial_delivered")) {
     const riderNote = await getSteadfastRiderNoteByInvoice(orderNumber);
     if (riderNote.ok && riderNote.data) {
       statusPayload = { ...remote.data, tracking_message: riderNote.data };

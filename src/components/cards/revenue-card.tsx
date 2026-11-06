@@ -52,9 +52,8 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
         </ResponsiveContainer>
       </div>
       <div className="mt-1 flex justify-between text-[11px]" style={{ color: "var(--text-faint)" }}>
-        {data.last7Days.map((p, i) => (
-          <span key={i}>{p.label}</span>
-        ))}
+        <span>{data.last7Days[0]?.label}</span>
+        <span>{data.last7Days.at(-1)?.label}</span>
       </div>
     </div>
   );

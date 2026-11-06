@@ -20,7 +20,7 @@ const TILE_STATUSES: InventoryStatus[] = ["out_of_stock", "critical", "replenish
 const selectStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 
 export default function NotificationsPage() {
-  const { notifications, orderUpdates, newOrders, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, markNewOrderRead, deleteNotification, deleteOrderUpdate, deleteNewOrder, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
+  const { notifications, orderUpdates, newOrders, board, hydrated, unreadCount, markAllRead, markOrderUpdateRead, markNewOrderRead, deleteNotification, deleteVariantNotifications, deleteOrderUpdate, deleteNewOrder, acknowledge, acknowledgeAll, clearResolved } = useNotifications();
   const { currentRole } = useAccess();
   const showToast = useToast();
 
@@ -322,6 +322,7 @@ export default function NotificationsPage() {
                   <th className="px-4 py-2.5 font-medium">Incoming</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 font-medium">Since</th>
+                  <th className="px-4 py-2.5 font-medium">Alerts</th>
                 </tr>
               </thead>
               <tbody>
@@ -352,6 +353,18 @@ export default function NotificationsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[12px]" style={{ color: "var(--text-faint)" }}>
                       {r.since ? timeAgo(r.since) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {notifications.some((n) => n.variantId === r.variantId) && <button
+                        aria-label={`Delete alerts for ${r.productName} ${r.color} ${r.size}`}
+                        title="Delete this item's stock alerts"
+                        onClick={() => {
+                          deleteVariantNotifications(r.variantId);
+                          showToast("Stock alerts deleted");
+                        }}
+                        className="focus-ring rounded-lg border p-1.5"
+                        style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+                      ><Trash2 size={13} /></button>}
                     </td>
                   </tr>
                 ))}

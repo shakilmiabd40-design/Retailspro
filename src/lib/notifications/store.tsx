@@ -60,6 +60,7 @@ interface NotificationsContextValue {
   markOrderUpdateRead: (id: string) => void;
   markNewOrderRead: (id: string) => void;
   deleteNotification: (id: string) => void;
+  deleteVariantNotifications: (variantId: string) => void;
   deleteOrderUpdate: (id: string) => void;
   deleteNewOrder: (id: string) => void;
   acknowledge: (id: string) => void;
@@ -237,6 +238,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       markOrderUpdateRead: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.id === id ? { ...n, read: true } : n) })),
       markNewOrderRead: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).map((n) => n.id === id ? { ...n, read: true } : n) })),
       deleteNotification: (id) => setData((prev) => ({ ...prev, notifications: prev.notifications.filter((n) => n.id !== id) })),
+      deleteVariantNotifications: (variantId) => setData((prev) => ({ ...prev, notifications: prev.notifications.filter((n) => n.variantId !== variantId) })),
       deleteOrderUpdate: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.filter((n) => n.id !== id) })),
       deleteNewOrder: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).filter((n) => n.id !== id) })),
       acknowledge: (id) =>

@@ -74,7 +74,13 @@ test("partial-delivery rider note supplies collected amount when COD is absent o
   assert.equal(readRiderNoteAmount(message), 100);
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", tracking_message: message }), 100);
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", cod_amount: 2490, tracking_message: message }), 100);
-  assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 80);
+  assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 100);
+});
+
+test("an explicit rider-note amount wins over a stale COD change while an explicit collected amount wins over the note", () => {
+  const message = 'Delivered. Note: Rider Note: "2450 tk hobe refar by marchant"';
+  assert.equal(readCourierPaidAmount({ status: "delivered", values: { cod_amount: 2490 }, tracking_message: message }), 2450);
+  assert.equal(readCourierPaidAmount({ status: "delivered", values: { collected_amount: 2460, cod_amount: 2490 }, tracking_message: message }), 2460);
 });
 
 test("tracking history selects the newest rider-note entry for manual partial-delivery sync", () => {

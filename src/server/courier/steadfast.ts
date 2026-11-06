@@ -167,13 +167,13 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
     data: {
       ...consignmentObj,
       ...raw,
-      // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
-      // actually collected on a partial delivery.
+      // Normalise COD fields without labelling them `collected_amount`: a later rider note may
+      // contain the actual amount collected and must be allowed to override this COD value.
       // Status lookup responses commonly use { status: 200, delivery_status: "pending" }.
       // Prefer the courier status field so the HTTP code is never mistaken for parcel status.
       status: reportedStatus(raw, consignmentObj),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
-      ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
+      ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
     },
   };
 }
@@ -197,11 +197,10 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
     data: {
       ...consignmentObj,
       ...raw,
-      // Normalised values go last so a raw `cod_amount` (the original COD) can't hide the amount
-      // actually collected on a partial delivery.
+      // Do not turn a COD value into a `collected_amount`; rider-note collection can override COD.
       status: reportedStatus(raw, consignmentObj),
       delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
-      ...(cod !== null ? { cod_amount: cod, codAmount: cod, collected_amount: cod, paid_amount: cod } : {}),
+      ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
     },
   };
 }
