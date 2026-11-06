@@ -25,14 +25,14 @@ export function NotificationBell() {
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -70,7 +70,7 @@ export function NotificationBell() {
 
       {open && (
         <div
-          className="card absolute right-0 top-11 z-50 w-[min(92vw,380px)] overflow-hidden shadow-xl"
+          className="card fixed right-2 top-16 z-50 flex max-h-[calc(100dvh-5rem)] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden shadow-xl sm:absolute sm:right-0 sm:top-11 sm:max-h-[min(80vh,560px)] sm:w-[min(92vw,380px)]"
           style={{ background: "var(--surface)" }}
           role="dialog"
           aria-label="Notifications"
@@ -94,7 +94,7 @@ export function NotificationBell() {
               All caught up. New order and stock alerts will show up here.
             </p>
           ) : (
-            <div className="max-h-[420px] divide-y overflow-y-auto" style={{ borderColor: "var(--border-soft)" }}>
+            <div className="min-h-0 max-h-[calc(100dvh-11rem)] divide-y overflow-y-auto sm:max-h-[420px]" style={{ borderColor: "var(--border-soft)" }}>
               {items.map((item) => {
                 const title = item.kind === "stock" ? item.data.productName : item.kind === "order" ? `New order #${item.data.orderNumber}` : `Courier update #${item.data.orderNumber}`;
                 const detail = item.kind === "stock"
