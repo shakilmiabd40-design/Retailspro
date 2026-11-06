@@ -7,11 +7,18 @@ import { Bell } from "lucide-react";
 import { useNotifications } from "@/lib/notifications/store";
 import { timeAgo } from "@/lib/dashboard";
 import { InventoryStatusBadge } from "./badges";
+import { useAccess } from "@/lib/settings/access";
+import type { InventoryNotification, NewOrderNotification, OrderCodUpdate } from "@/lib/notifications/types";
 
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 } as const;
+type BellItem =
+  | { kind: "stock"; data: InventoryNotification; rank: number }
+  | { kind: "courier"; data: OrderCodUpdate; rank: number }
+  | { kind: "order"; data: NewOrderNotification; rank: number };
 
 export function NotificationBell() {
-  const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
+  const { notifications, orderUpdates, newOrders, unreadCount, markRead, markAllRead, markOrderUpdateRead, markNewOrderRead } = useNotifications();
+  const { currentRole } = useAccess();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -30,11 +37,16 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  // Worst first, then newest. Shows what is unread or still needs action.
-  const items = notifications
-    .filter((n) => !n.read || n.state !== "resolved")
-    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.timestamp.localeCompare(a.timestamp))
-    .slice(0, 6);
+  // Show all notification types that contribute to the unread badge.
+  const items: BellItem[] = [
+    ...notifications
+      .filter((n) => !n.read || n.state !== "resolved")
+      .map((n) => ({ kind: "stock" as const, data: n, rank: SEVERITY_RANK[n.severity] })),
+    ...orderUpdates.filter((n) => !n.read).map((n) => ({ kind: "courier" as const, data: n, rank: 0 })),
+    ...newOrders
+      .filter((n) => !n.read && n.roleIds.includes(currentRole.id))
+      .map((n) => ({ kind: "order" as const, data: n, rank: 0 })),
+  ].sort((a, b) => a.rank - b.rank || b.data.timestamp.localeCompare(a.data.timestamp)).slice(0, 6);
 
   return (
     <div ref={rootRef} className="relative">
@@ -61,7 +73,7 @@ export function NotificationBell() {
           className="card absolute right-0 top-11 z-50 w-[min(92vw,380px)] overflow-hidden shadow-xl"
           style={{ background: "var(--surface)" }}
           role="dialog"
-          aria-label="Inventory notifications"
+          aria-label="Notifications"
         >
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--border)" }}>
             <p className="text-[13.5px] font-semibold" style={{ color: "var(--text)" }}>
@@ -69,7 +81,7 @@ export function NotificationBell() {
             </p>
             <button
               onClick={markAllRead}
-              disabled={!items.some((n) => !n.read)}
+              disabled={unreadCount === 0}
               className="focus-ring rounded-md text-[12px] font-medium disabled:opacity-40"
               style={{ color: "var(--brand)" }}
             >
@@ -79,37 +91,52 @@ export function NotificationBell() {
 
           {items.length === 0 ? (
             <p className="px-4 py-10 text-center text-[12.5px]" style={{ color: "var(--text-muted)" }}>
-              All caught up. Stock alerts will show up here.
+              All caught up. New order and stock alerts will show up here.
             </p>
           ) : (
             <div className="max-h-[420px] divide-y overflow-y-auto" style={{ borderColor: "var(--border-soft)" }}>
-              {items.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => {
-                    markRead(n.id);
-                    setOpen(false);
-                    router.push(`/notifications/${n.id}`);
-                  }}
-                  className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--surface-2)]"
-                >
-                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: n.read ? "transparent" : "var(--brand)" }} />
-                  <span className="min-w-0 flex-1">
-                    <span className="mb-1 flex items-center justify-between gap-2">
-                      <InventoryStatusBadge status={n.status} />
-                      <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-                        {timeAgo(n.timestamp)}
+              {items.map((item) => {
+                const title = item.kind === "stock" ? item.data.productName : item.kind === "order" ? `New order #${item.data.orderNumber}` : `Courier update #${item.data.orderNumber}`;
+                const detail = item.kind === "stock"
+                  ? `${item.data.color} / ${item.data.size} · ${item.data.quantityOnHand} available`
+                  : item.kind === "order"
+                    ? item.data.customerName
+                    : `COD changed to ৳${item.data.currentAmount.toLocaleString()}`;
+                return (
+                  <button
+                    key={`${item.kind}:${item.data.id}`}
+                    onClick={() => {
+                      if (item.kind === "stock") {
+                        markRead(item.data.id);
+                        setOpen(false);
+                        router.push(`/notifications/${item.data.id}`);
+                      } else {
+                        if (item.kind === "order") markNewOrderRead(item.data.id);
+                        else markOrderUpdateRead(item.data.id);
+                        setOpen(false);
+                        router.push(`/orders/${item.data.orderId}`);
+                      }
+                    }}
+                    className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: item.data.read ? "transparent" : "var(--brand)" }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="mb-1 flex items-center justify-between gap-2">
+                        {item.kind === "stock" ? <InventoryStatusBadge status={item.data.status} /> : <span className="text-[11px] font-semibold" style={{ color: "var(--brand-strong)" }}>{item.kind === "order" ? "New order" : "Courier COD"}</span>}
+                        <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+                          {timeAgo(item.data.timestamp)}
+                        </span>
+                      </span>
+                      <span className="block truncate text-[13px] font-medium" style={{ color: "var(--text)" }}>
+                        {title}
+                      </span>
+                      <span className="block truncate text-[12px]" style={{ color: "var(--text-muted)" }}>
+                        {detail}
                       </span>
                     </span>
-                    <span className="block truncate text-[13px] font-medium" style={{ color: "var(--text)" }}>
-                      {n.productName}
-                    </span>
-                    <span className="block truncate text-[12px]" style={{ color: "var(--text-muted)" }}>
-                      {n.color} / {n.size} · {n.quantityOnHand} available
-                    </span>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
 

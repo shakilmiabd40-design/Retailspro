@@ -11,6 +11,7 @@ import { PAYMENT_LABELS, checkPayments, computeTotals, discountLimitError, round
 import { Chip, GhostBtn, LabeledField, PosModal, PrimaryBtn, fieldInput, fieldStyle, money } from "./ui";
 import { DiscountInput } from "./discount-input";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
+import { parseContactDetails } from "@/lib/orders/contact-details";
 import { ReceiptDialog } from "./receipt";
 
 interface Row {
@@ -330,7 +331,25 @@ export function CheckoutModal({ draft, liveLines, onCustomer, onSaleSaved, onRes
                 </LabeledField>
               </div>
               <LabeledField label="Delivery address" required>
-                <textarea value={c.address} rows={2} onChange={(e) => onCustomer({ address: e.target.value, walkIn: false })} className={fieldInput} style={fieldStyle} />
+                <textarea
+                  value={c.address}
+                  rows={2}
+                  onChange={(e) => onCustomer({ address: e.target.value, walkIn: false })}
+                  onPaste={(e) => {
+                    const parsed = parseContactDetails(e.clipboardData.getData("text"));
+                    if (!parsed.name && !parsed.phone) return;
+                    e.preventDefault();
+                    onCustomer({
+                      ...(parsed.name && !c.name.trim() ? { name: parsed.name } : {}),
+                      ...(parsed.phone && !c.phone.trim() ? { phone: parsed.phone } : {}),
+                      address: parsed.address ?? "",
+                      walkIn: false,
+                    });
+                  }}
+                  placeholder="Paste customer details with name and phone to fill these fields"
+                  className={fieldInput}
+                  style={fieldStyle}
+                />
               </LabeledField>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <LabeledField label="District">

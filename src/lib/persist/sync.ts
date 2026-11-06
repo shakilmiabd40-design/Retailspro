@@ -244,6 +244,14 @@ class SyncManager {
         // If nobody else wrote in between, our own bump is the only change — no need to reload it.
         if (res.revs[a.name] === a.rev + 1) a.rev = res.revs[a.name];
       }
+      // Some transactions update related documents as server-side effects (for example, creating an
+      // order also appends its in-app notification). Reload those documents immediately instead of
+      // waiting for the next revision poll.
+      const writtenNames = new Set(batch.map(({ a }) => a.name));
+      for (const [name, rev] of Object.entries(res.revs)) {
+        const a = this.adapters.get(name);
+        if (a && !writtenNames.has(name) && rev !== a.rev) this.queueLoad(name, { force: false, passive: true });
+      }
       this.retryIndex = 0;
       this.setStatus({ state: "idle", lastSavedAt: Date.now() });
     } catch (err) {

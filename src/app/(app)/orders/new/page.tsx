@@ -10,6 +10,7 @@ import { useOrders } from "@/lib/orders/store";
 import { useToast } from "@/components/toast";
 import { availableStock, formatTaka } from "@/lib/products/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
+import { parseContactDetails } from "@/lib/orders/contact-details";
 import type { OrderItem } from "@/lib/orders/types";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
@@ -243,7 +244,22 @@ export default function CreateOrderPage() {
           </Field>
         </div>
         <Field label="Address" required>
-          <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} className={inputClass} style={inputStyle} />
+          <textarea
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            onPaste={(e) => {
+              const parsed = parseContactDetails(e.clipboardData.getData("text"));
+              if (!parsed.name && !parsed.phone) return;
+              e.preventDefault();
+              if (parsed.name && !customerName.trim()) setCustomerName(parsed.name);
+              if (parsed.phone && !phone.trim()) setPhone(parsed.phone);
+              setAddress(parsed.address ?? "");
+            }}
+            rows={2}
+            placeholder="Paste customer details with name and phone to fill these fields"
+            className={inputClass}
+            style={inputStyle}
+          />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Order Discount (৳)">

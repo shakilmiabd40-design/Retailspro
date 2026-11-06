@@ -6,6 +6,7 @@ import { api } from "@/lib/persist/api";
 import { useProducts } from "@/lib/products/store";
 import { usePurchaseOrders } from "@/lib/purchase-orders/store";
 import type { PurchaseOrder } from "@/lib/purchase-orders/types";
+import { useAccess } from "@/lib/settings/access";
 import {
   DEFAULT_SETTINGS,
   NOTIFIABLE_STATUSES,
@@ -92,6 +93,7 @@ function clampSettings(s: NotificationSettings): NotificationSettings {
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
+  const { currentRole } = useAccess();
   const dashboard = pathname === "/";
   const { products, loaded: productsLoaded } = useProducts();
   const { purchaseOrders, loaded: posLoaded } = usePurchaseOrders();
@@ -211,7 +213,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       board,
       settings,
       hydrated: ready,
-      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length + orderNotificationData.updates.filter((n) => !n.read).length + (orderNotificationData.newOrders ?? []).filter((n) => !n.read).length,
+      unreadCount: data.notifications.filter((n) => !n.read && n.severity !== "info").length
+        + orderNotificationData.updates.filter((n) => !n.read).length
+        + (orderNotificationData.newOrders ?? []).filter((n) => !n.read && n.roleIds.includes(currentRole.id)).length,
       getNotification: (id) => data.notifications.find((n) => n.id === id),
       historyFor: (variantId) => data.history.filter((h) => h.variantId === variantId).sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
       linkedPurchaseOrders: (variantId) =>
@@ -221,7 +225,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       markRead: (id) => patchOne(id, (n) => (n.read ? n : { ...n, read: true })),
       markAllRead: () => {
         setData((prev) => ({ ...prev, notifications: prev.notifications.map((n) => (n.read ? n : { ...n, read: true })) }));
-        setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.read ? n : { ...n, read: true }) }));
+        setOrderNotificationData((prev) => ({
+          ...prev,
+          updates: prev.updates.map((n) => n.read ? n : { ...n, read: true }),
+          newOrders: (prev.newOrders ?? []).map((n) => n.read ? n : { ...n, read: true }),
+        }));
       },
       markOrderUpdateRead: (id) => setOrderNotificationData((prev) => ({ ...prev, updates: prev.updates.map((n) => n.id === id ? { ...n, read: true } : n) })),
       markNewOrderRead: (id) => setOrderNotificationData((prev) => ({ ...prev, newOrders: (prev.newOrders ?? []).map((n) => n.id === id ? { ...n, read: true } : n) })),
@@ -261,7 +269,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       updateSettings: (patch) => setSettings((prev) => clampSettings({ ...prev, ...patch })),
       resetSettings: () => setSettings(DEFAULT_SETTINGS),
     }),
-    [data, board, settings, ready, purchaseOrders, patchOne, setData, setSettings, orderNotificationData, setOrderNotificationData]
+    [data, board, settings, ready, purchaseOrders, patchOne, setData, setSettings, orderNotificationData, setOrderNotificationData, currentRole.id]
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
