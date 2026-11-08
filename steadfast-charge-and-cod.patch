@@ -1,0 +1,197 @@
+diff --git a/src/components/orders/update-status-modal.tsx b/src/components/orders/update-status-modal.tsx
+index 40df594..5598501 100644
+--- a/src/components/orders/update-status-modal.tsx
++++ b/src/components/orders/update-status-modal.tsx
+@@ -186,7 +186,9 @@ export function UpdateStatusModal({
+         const s = String(res.status).toLowerCase();
+         showToast(`Steadfast says: ${res.status}`);
+         // Log all possible charge fields to find the right one
+-        const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
++        // Steadfast's status lookup doesn't report a charge; 0/missing must not wipe the one already recorded.
++        const reported = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
++        const charge = Number.isFinite(reported) && reported > 0 ? reported : order.courier.forwardCost || 0;
+         setForwardCharge(charge);
+         const collected = Number(
+           res.cod_amount ??
+diff --git a/src/server/courier/apply-steadfast-status.ts b/src/server/courier/apply-steadfast-status.ts
+index 14774dc..2cfaffd 100644
+--- a/src/server/courier/apply-steadfast-status.ts
++++ b/src/server/courier/apply-steadfast-status.ts
+@@ -5,7 +5,7 @@ import { bumpRev } from "@/server/seed";
+ import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
+ import { expectedCod, FINAL_STATUSES } from "@/lib/orders/utils";
+ import type { Order } from "@/lib/orders/types";
+-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, toAmount } from "./steadfast-status";
++import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge } from "./steadfast-status";
+ import { COUNTER_START } from "@/server/collections";
+ import { postAccountingChanges } from "@/server/accounting/auto-post";
+ 
+@@ -74,6 +74,17 @@ export async function loadOrderForConsignment(
+   return null;
+ }
+ 
++/** The courier's default forward cost from Settings → Courier & Settlement (null when unset or zero). */
++async function defaultSteadfastForwardCost(client: PoolClient, company: string | undefined): Promise<number | null> {
++  const { rows } = await client.query<{ couriers: { id?: string; name?: string; defaultForwardCost?: number }[] | null }>(
++    "select data->'courier'->'couriers' as couriers from app_documents where key = 'settings' limit 1"
++  );
++  const name = (company ?? "").trim().toLowerCase();
++  const hit = (rows[0]?.couriers ?? []).find((c) => c.id === "cr-steadfast" || (c.name ?? "").trim().toLowerCase() === (name || "steadfast"));
++  const cost = Number(hit?.defaultForwardCost);
++  return Number.isFinite(cost) && cost > 0 ? cost : null;
++}
++
+ const LABELS: Record<string, string> = {
+   in_transit: "Marked In Transit (Steadfast)",
+   delivered: "Marked Delivered (Steadfast)",
+@@ -106,7 +117,8 @@ export async function applyStatusToOrder(
+ 
+   const rawStatus = normalizeSteadfastStatus(field("status"));
+   const mapped = mapSteadfastStatus(rawStatus);
+-  const charge = toAmount(field("delivery_charge"));
++  // Only a positive figure counts as "reported" — 0/missing must not wipe a charge we already have.
++  const charge = readDeliveryCharge({ ...(consignment ?? {}), ...event, ...(values ?? {}) });
+   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
+   // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
+   // same already-final status, or carry no status at all.
+@@ -115,7 +127,8 @@ export async function applyStatusToOrder(
+   const rawHappenedAt = field("updated_at");
+   const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
+ 
+-  // The courier's confirmed forward charge is only known once it has the parcel.
++  // The courier's confirmed forward charge is only known once it has the parcel. A reported charge
++  // always wins; a missing/zero one never erases what is already recorded (partial deliveries often omit it).
+   if (charge !== null) order.courier = { ...order.courier, forwardCost: charge };
+   if (rawStatus) order.courier = { ...order.courier, status: rawStatus };
+ 
+@@ -123,6 +136,15 @@ export async function applyStatusToOrder(
+     order.courier = { ...order.courier, dispatchDate: happenedAt.slice(0, 10) };
+   }
+ 
++  // Processing → In Transit: Steadfast's status lookup never returns a charge, so when the event didn't
++  // carry one, book the courier's configured default forward cost now (a later webhook with the real
++  // charge replaces it).
++  let estimatedCharge: number | null = null;
++  if (mapped === "in_transit" && charge === null && !(order.courier.forwardCost > 0)) {
++    estimatedCharge = await defaultSteadfastForwardCost(client, order.courier.company);
++    if (estimatedCharge !== null) order.courier = { ...order.courier, forwardCost: estimatedCharge };
++  }
++
+   // Never walk a finished order backwards (e.g. a late "pending" event after delivery).
+   if (mapped && !FINAL_STATUSES.includes(order.status)) {
+     if (mapped === "in_transit") {
+@@ -164,11 +186,14 @@ export async function applyStatusToOrder(
+   const label = mapped ? LABELS[mapped] : LABELS.none;
+   const codDetail = codChanged ? `Customer Paid changed ৳${(prev.delivery.customerPaid || expectedCod(prev)).toLocaleString()} → ৳${cod.toLocaleString()}` : "";
+   const statusDetail = rawStatus ? `Steadfast status: ${rawStatus}${message ? ` — ${message}` : ""}` : message || "Steadfast update";
+-  const detail = [statusDetail, codDetail].filter(Boolean).join(" · ");
++  const chargeDetail = charge !== null && prev.courier.forwardCost !== charge
++    ? `Courier charge ৳${charge.toLocaleString()}`
++    : estimatedCharge !== null ? `Courier charge ৳${estimatedCharge.toLocaleString()} (default, awaiting Steadfast's figure)` : "";
++  const detail = [statusDetail, chargeDetail, codDetail].filter(Boolean).join(" · ");
+ 
+   // Steadfast retries webhooks; skip the write when nothing actually changed.
+   const last = order.activity[order.activity.length - 1];
+-  const sameStatusDetail = last?.detail === detail || (!codChanged && last?.detail?.startsWith(`${statusDetail} · Customer Paid changed `));
++  const sameStatusDetail = last?.detail === detail || (!codChanged && !!last?.detail && (last.detail === statusDetail || last.detail.startsWith(`${statusDetail} · `)));
+   const nothingNew =
+     prev.status === order.status &&
+     JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
+diff --git a/src/server/courier/steadfast-status.test.ts b/src/server/courier/steadfast-status.test.ts
+index f51c582..741de73 100644
+--- a/src/server/courier/steadfast-status.test.ts
++++ b/src/server/courier/steadfast-status.test.ts
+@@ -3,7 +3,7 @@
+ // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
+ import { test } from "node:test";
+ import assert from "node:assert/strict";
+-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
++import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
+ 
+ test("status strings are normalised regardless of case, spaces or hyphens", () => {
+   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
+@@ -96,3 +96,12 @@ test("tracking history selects the newest rider-note entry for manual partial-de
+   assert.equal(readLatestRiderTrackingMessage(history), latest);
+   assert.equal(readCourierPaidAmount({ tracking_message: readLatestRiderTrackingMessage(history) }), 100);
+ });
++
++test("a delivery charge of 0 or a missing one is 'not reported' so it never wipes a known charge", () => {
++  assert.equal(readDeliveryCharge({ delivery_charge: 0 }), null);
++  assert.equal(readDeliveryCharge({ delivery_charge: "" }), null);
++  assert.equal(readDeliveryCharge({}), null);
++  assert.equal(readDeliveryCharge(null), null);
++  assert.equal(readDeliveryCharge({ delivery_charge: "100.00" }), 100);
++  assert.equal(readDeliveryCharge({ delivery_fee: 80 }), 80);
++});
+diff --git a/src/server/courier/steadfast-status.ts b/src/server/courier/steadfast-status.ts
+index 2d78fc8..f1edb3a 100644
+--- a/src/server/courier/steadfast-status.ts
++++ b/src/server/courier/steadfast-status.ts
+@@ -162,3 +162,17 @@ export function readCourierPaidAmount(event: Record<string, unknown> | null | un
+   if (changedCod !== null) return changedCod;
+   return readPaidAmount(consignment) ?? readPaidAmount(event);
+ }
++
++/**
++ * The courier's delivery charge. Steadfast names it `delivery_charge` on webhooks (one SDK documents
++ * `delivery_fee`). Zero or missing means "not reported yet" — Steadfast sends 0 on the early statuses
++ * and sometimes on a partial delivery — so it returns `null` and must never overwrite a known charge.
++ */
++export function readDeliveryCharge(source: Record<string, unknown> | null | undefined): number | null {
++  if (!source) return null;
++  for (const key of ["delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee", "charge"]) {
++    const value = toAmount(source[key]);
++    if (value !== null && value > 0) return value;
++  }
++  return null;
++}
+diff --git a/src/server/courier/steadfast.ts b/src/server/courier/steadfast.ts
+index f5151d9..34c46c7 100644
+--- a/src/server/courier/steadfast.ts
++++ b/src/server/courier/steadfast.ts
+@@ -1,6 +1,6 @@
+ import "server-only";
+ import { query } from "../db";
+-import { readCourierPaidAmount, readLatestRiderTrackingMessage } from "./steadfast-status";
++import { readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage } from "./steadfast-status";
+ 
+ /**
+  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
+@@ -161,6 +161,7 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
+   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+ 
+   const cod = readCourierPaidAmount(raw, consignmentObj);
++  const charge = readDeliveryCharge(consignmentObj) ?? readDeliveryCharge(raw);
+ 
+   return {
+     ok: true,
+@@ -172,7 +173,9 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
+       // Status lookup responses commonly use { status: 200, delivery_status: "pending" }.
+       // Prefer the courier status field so the HTTP code is never mistaken for parcel status.
+       status: reportedStatus(raw, consignmentObj),
+-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
++      // status_by_cid / status_by_invoice never include a charge; leave it out (not 0) so nothing downstream
++      // mistakes "not reported" for "free delivery".
++      ...(charge !== null ? { delivery_charge: charge } : {}),
+       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
+     },
+   };
+@@ -192,6 +195,7 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
+   const raw = res.data as Record<string, unknown>;
+   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+   const cod = readCourierPaidAmount(raw, consignmentObj);
++  const charge = readDeliveryCharge(consignmentObj) ?? readDeliveryCharge(raw);
+   return {
+     ok: true,
+     data: {
+@@ -199,7 +203,9 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
+       ...raw,
+       // Do not turn a COD value into a `collected_amount`; rider-note collection can override COD.
+       status: reportedStatus(raw, consignmentObj),
+-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
++      // status_by_cid / status_by_invoice never include a charge; leave it out (not 0) so nothing downstream
++      // mistakes "not reported" for "free delivery".
++      ...(charge !== null ? { delivery_charge: charge } : {}),
+       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
+     },
+   };
