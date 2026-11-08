@@ -212,6 +212,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
       perm: { module: "reports", action: "view" },
       children: [
         { label: "Dashboard (Summary)", href: "/reports", icon: LayoutGrid },
+        { label: "Sales by Channel", href: "/reports/channels", icon: Store },
         { label: "Sales & COD", href: "/reports/sales-cod", icon: Wallet },
         { label: "Courier Cost & P/L", href: "/reports/courier", icon: Truck },
         { label: "Settlement Report", href: "/reports/settlement", icon: Landmark, perm: { module: "settlement", action: "view" } },
@@ -223,6 +224,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         { label: "Supplier Report", href: "/reports/suppliers", icon: Store },
         { label: "Returns Report", href: "/reports/returns", icon: Undo2 },
         { label: "Warranty Report", href: "/reports/warranty", icon: ShieldCheck },
+        { label: "Sync Health", href: "/reports/sync-health", icon: Plug },
       ],
     },
     {

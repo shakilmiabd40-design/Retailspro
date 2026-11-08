@@ -197,3 +197,105 @@ create table if not exists app_sent_notification_emails (
   notification_id  text primary key,
   sent_at           timestamptz not null default now()
 );
+
+
+-- ── Marketing Ad Spend (Daily spend per platform and campaign) ─────────────
+create table if not exists app_ad_spend (
+  id              bigint generated always as identity primary key,
+  spend_date      date not null,
+  platform        text not null check (platform in ('meta', 'facebook', 'instagram', 'google', 'tiktok', 'other')),
+  campaign_id     text not null default '',
+  campaign_name   text not null,
+  ad_set_name     text not null default '',
+  ad_name         text not null default '',
+  spend           numeric(12,2) not null default 0,
+  currency        text not null default 'BDT',
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create unique index if not exists app_ad_spend_daily_uniq
+  on app_ad_spend (spend_date, lower(platform), lower(campaign_name), lower(ad_name));
+create index if not exists app_ad_spend_date_idx on app_ad_spend (spend_date desc);
+
+-- ── Report Daily Summary Rollup (Database-backed performance aggregator) ────
+create table if not exists app_report_daily_summary (
+  report_date              date not null,
+  channel                  text not null, -- website, facebook, instagram, shop
+  campaign                 text not null default 'unattributed',
+  placed_orders            integer not null default 0,
+  confirmed_orders         integer not null default 0,
+  shipped_orders           integer not null default 0,
+  delivered_orders         integer not null default 0,
+  refused_orders           integer not null default 0,
+  returned_orders          integer not null default 0,
+  gross_sales              numeric(14,2) not null default 0,
+  discounts                numeric(14,2) not null default 0,
+  net_revenue              numeric(14,2) not null default 0,
+  product_cost             numeric(14,2) not null default 0,
+  outbound_courier_cost    numeric(14,2) not null default 0,
+  return_courier_cost      numeric(14,2) not null default 0,
+  cod_fees                 numeric(14,2) not null default 0,
+  ad_spend                 numeric(14,2) not null default 0,
+  gross_profit             numeric(14,2) not null default 0,
+  net_profit               numeric(14,2) not null default 0,
+  expected_revenue         numeric(14,2) not null default 0,
+  updated_at               timestamptz not null default now(),
+  primary key (report_date, channel, campaign)
+);
+create index if not exists app_report_daily_summary_date_idx
+  on app_report_daily_summary (report_date desc);
+
+-- ── Sync Failures Log & Retry Queue ────────────────────────────────────────
+create table if not exists app_sync_failures (
+  id             bigint generated always as identity primary key,
+  external_id    text not null,
+  source         text not null default 'website',
+  api_key_id     text,
+  api_key_name   text,
+  payload        jsonb not null,
+  error_message  text not null,
+  status         text not null default 'pending' check (status in ('pending', 'retried', 'resolved')),
+  retry_count    integer not null default 0,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  resolved_at    timestamptz
+);
+-- Databases created before the retry queue stored the API key identity get it added safely.
+alter table if exists app_sync_failures add column if not exists api_key_id text;
+alter table if exists app_sync_failures add column if not exists api_key_name text;
+alter table if exists app_sync_failures add column if not exists updated_at timestamptz not null default now();
+create index if not exists app_sync_failures_status_idx on app_sync_failures (status, created_at desc);
+-- One open failure per (external_id, source): repeated webhook deliveries update the same row
+-- instead of flooding the queue. Resolve older duplicates before the unique index is created.
+update app_sync_failures f
+   set status = 'resolved', resolved_at = coalesce(f.resolved_at, now())
+ where f.status = 'pending'
+   and exists (
+     select 1 from app_sync_failures g
+      where g.status = 'pending'
+        and g.external_id = f.external_id
+        and g.source = f.source
+        and g.id > f.id
+   );
+create unique index if not exists app_sync_failures_pending_uniq
+  on app_sync_failures (external_id, source) where status = 'pending';
+
+-- ── Extracted Order Reporting Indexes ──────────────────────────────────────
+create index if not exists app_records_orders_source_idx
+  on app_records ((data->>'source')) where collection = 'orders';
+create index if not exists app_records_orders_delivered_date_idx
+  on app_records ((data #>> '{delivery,deliveryDate}')) where collection = 'orders';
+create index if not exists app_records_orders_customer_phone_idx
+  on app_records ((data->>'phone')) where collection = 'orders';
+create index if not exists app_records_orders_campaign_idx
+  on app_records ((data #>> '{utm,campaign}')) where collection = 'orders';
+create index if not exists app_records_orders_refusal_reason_idx
+  on app_records ((data #>> '{cancellation,refusalReason}')) where collection = 'orders';
+create index if not exists app_records_orders_updated_idx
+  on app_records (updated_at desc) where collection = 'orders';
+create index if not exists app_records_pos_invoices_created_idx
+  on app_records ((data->>'createdAt')) where collection = 'pos_invoices';
+create index if not exists app_records_pos_returns_created_idx
+  on app_records ((data->>'createdAt')) where collection = 'pos_returns';
+create index if not exists app_ad_spend_campaign_idx
+  on app_ad_spend (lower(campaign_name), spend_date desc);

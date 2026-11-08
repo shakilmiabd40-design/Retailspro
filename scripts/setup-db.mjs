@@ -44,7 +44,7 @@ function sslFor(host) {
 
 const RESET = process.argv.includes("--reset");
 const YES = process.argv.includes("--yes");
-const TABLES = ["app_sent_notification_emails", "app_webhook_deliveries", "app_webhooks", "app_api_keys", "app_audit_log", "app_counters", "app_revs", "app_documents", "app_records", "app_sessions", "app_users", "app_roles"];
+const TABLES = ["app_sync_failures", "app_report_daily_summary", "app_ad_spend", "app_sent_notification_emails", "app_webhook_deliveries", "app_webhooks", "app_api_keys", "app_audit_log", "app_counters", "app_revs", "app_documents", "app_records", "app_sessions", "app_users", "app_roles"];
 
 async function main() {
   const url = process.env.DATABASE_URL;

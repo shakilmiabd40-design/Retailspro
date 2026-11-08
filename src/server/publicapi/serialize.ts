@@ -62,7 +62,7 @@ export function toApiOrder(o: Order) {
     id: o.id,
     order_number: o.orderNumber,
     external_id: o.externalId ?? null,
-    channel: o.channel ?? (o.source === "pos" ? "pos" : "dashboard"),
+    channel: o.channel ?? (o.source === "pos" || o.source === "shop" ? "pos" : "dashboard"),
     status: o.status,
     customer: {
       name: o.customerName,

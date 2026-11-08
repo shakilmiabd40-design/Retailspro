@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { query } from "@/server/db";
 import { apiRoute, encodeCursor, ok, pageParams, parseSince, readBody } from "@/server/publicapi/http";
 import { authenticateApiKey } from "@/server/publicapi/apikeys";
-import { createApiOrder, normalizeBdPhone, parseCreateOrder } from "@/server/publicapi/orders";
+import { createApiOrder, logSyncFailure, normalizeBdPhone, parseCreateOrder } from "@/server/publicapi/orders";
 import { toApiOrder } from "@/server/publicapi/serialize";
 import { deliverDue } from "@/server/publicapi/webhooks";
 import { sendNewOrderNotificationEmail } from "@/server/order-notification-email";
@@ -47,11 +47,18 @@ export const GET = apiRoute(async (req) => {
  */
 export const POST = apiRoute(async (req) => {
   const key = await authenticateApiKey(req, "orders:write");
-  const input = parseCreateOrder(await readBody(req));
-  const { order, duplicate } = await createApiOrder(req, key, input);
-  if (!duplicate) {
-    after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
-    after(() => sendNewOrderNotificationEmail(order).catch((e) => console.error("[notifications] new-order email handler failed", e)));
+  const raw = await readBody(req);
+  try {
+    const input = parseCreateOrder(raw);
+    const { order, duplicate } = await createApiOrder(req, key, input);
+    if (!duplicate) {
+      after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+      after(() => sendNewOrderNotificationEmail(order).catch((e) => console.error("[notifications] new-order email handler failed", e)));
+    }
+    return ok(toApiOrder(order), { duplicate }, { status: duplicate ? 200 : 201, headers: duplicate ? { "Idempotent-Replayed": "true" } : undefined });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await logSyncFailure(key, raw, msg);
+    throw err;
   }
-  return ok(toApiOrder(order), { duplicate }, { status: duplicate ? 200 : 201, headers: duplicate ? { "Idempotent-Replayed": "true" } : undefined });
 });

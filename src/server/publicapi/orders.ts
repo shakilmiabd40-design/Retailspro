@@ -52,6 +52,13 @@ interface CreateInput {
   notes?: string;
   deliveryCharge: number;
   lines: LineInput[];
+  utm?: {
+    source?: string;
+    medium?: string;
+    campaign?: string;
+    adSet?: string;
+    ad?: string;
+  };
 }
 
 export function parseCreateOrder(body: Record<string, unknown>): CreateInput {
@@ -87,10 +94,21 @@ export function parseCreateOrder(body: Record<string, unknown>): CreateInput {
     return { sku, productId, variantId, qty, unitPrice, discount };
   });
 
+
   const deliveryCharge = body.delivery_charge === undefined || body.delivery_charge === null ? 0 : money(body.delivery_charge, "delivery_charge", { max: 100_000 });
   const district = text(c.district, 60) || undefined;
   const area = text(c.area, 60) || undefined;
-  return { externalId, name, phone, altPhone, address, district, area, notes: text(body.notes, 1000) || undefined, deliveryCharge, lines };
+  const utmObj = isObj(body.utm) ? (body.utm as Record<string, unknown>) : null;
+  const utm = {
+    source: text(utmObj?.source ?? body.utm_source, 100) || undefined,
+    medium: text(utmObj?.medium ?? body.utm_medium, 100) || undefined,
+    campaign: text(utmObj?.campaign ?? body.utm_campaign, 100) || undefined,
+    adSet: text(utmObj?.ad_set ?? utmObj?.adSet ?? body.utm_term, 100) || undefined,
+    ad: text(utmObj?.ad ?? body.utm_content, 100) || undefined,
+  };
+  const hasUtm = Boolean(utm.source || utm.medium || utm.campaign || utm.adSet || utm.ad);
+
+  return { externalId, name, phone, altPhone, address, district, area, notes: text(body.notes, 1000) || undefined, deliveryCharge, lines, utm: hasUtm ? utm : undefined };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -171,6 +189,7 @@ export async function createApiOrder(req: NextRequest, key: ApiKeyAuth, input: C
         const n = need.get(itemsKey({ productId: id, variantId: v.id }));
         return n ? { ...v, reserved: (v.reserved ?? 0) + n.qty } : null;
       });
+
       after.push(next);
     }
     await saveProducts(client, after, actor);
@@ -195,7 +214,8 @@ export async function createApiOrder(req: NextRequest, key: ApiKeyAuth, input: C
       notes: input.notes,
       items,
       deliveryCharge: input.deliveryCharge,
-      source: "api",
+      source: "website",
+      utm: input.utm,
       channel: key.name,
       externalId: input.externalId,
       courier: { company: "", trackingId: "", forwardCost: 0, returnCost: 0, otherCost: 0 },
@@ -241,6 +261,7 @@ export async function createApiOrder(req: NextRequest, key: ApiKeyAuth, input: C
     await writeAudit(req, { userId: null, userName: actorName, module: "Orders", action: "create", entity: `Order ${order.orderNumber}`, summary: `Order ${order.orderNumber} created via API (${key.name}, ref ${input.externalId})`, after: { channel: key.name, externalId: input.externalId, items: items.length } }, client);
     return { order, duplicate: false };
   });
+
   return result;
 }
 
@@ -302,4 +323,31 @@ export async function cancelApiOrder(req: NextRequest, key: ApiKeyAuth, ref: str
     await writeAudit(req, { userId: null, userName: actorName, module: "Orders", action: "status_change", entity: `Order ${next.orderNumber}`, summary: `Order ${next.orderNumber} cancelled via API (${reason})`, before: { status: prev.status }, after: { status: "cancelled" } }, client);
     return next;
   });
+
+}
+
+export async function logSyncFailure(
+  key: Pick<ApiKeyAuth, "id" | "name"> | null,
+  payload: unknown,
+  errorMessage: string,
+  source = "website",
+): Promise<void> {
+  try {
+    const body = (payload ?? {}) as Record<string, unknown>;
+    const externalId = typeof body.external_id === "string" && body.external_id.trim() ? body.external_id.trim().slice(0, 100) : "unknown";
+    await query(
+      `insert into app_sync_failures (external_id, source, api_key_id, api_key_name, payload, error_message, status)
+       values ($1, $2, $3, $4, $5::jsonb, $6, 'pending')
+       on conflict (external_id, source) where status = 'pending'
+       do update set
+         api_key_id = excluded.api_key_id,
+         api_key_name = excluded.api_key_name,
+         payload = excluded.payload,
+         error_message = excluded.error_message,
+         updated_at = now()`,
+      [externalId, source, key?.id ?? null, key?.name ?? null, JSON.stringify(body), errorMessage.slice(0, 1000)]
+    );
+  } catch (err) {
+    console.error("[sync_failures] Failed to record sync failure:", err);
+  }
 }
