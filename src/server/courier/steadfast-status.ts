@@ -73,6 +73,29 @@ export function toAmount(raw: unknown): number | null {
 }
 
 /**
+ * The forward delivery charge Steadfast reports. Status lookups omit `delivery_charge` until the
+ * courier fixes it, and some responses send `0` instead of leaving it out. Both mean "not
+ * reported": returning `null` keeps the order's recorded courier cost instead of wiping it to 0
+ * (which is what used to happen when a partial delivery was synced from Steadfast).
+ */
+export function readDeliveryCharge(
+  event: Record<string, unknown> | null | undefined,
+  consignment?: Record<string, unknown> | null
+): number | null {
+  const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)
+    ? event.values as Record<string, unknown>
+    : null;
+  for (const source of [values, consignment, event]) {
+    if (!source) continue;
+    for (const key of ["delivery_charge", "deliveryCharge", "charge"]) {
+      const amount = toAmount(source[key]);
+      if (amount !== null && amount > 0) return amount;
+    }
+  }
+  return null;
+}
+
+/**
  * The amount the customer actually paid. Steadfast's webhook calls it `cod_amount`, but older
  * accounts and the status lookup use other names, so read them all in one place. Fields that
  * explicitly mean "collected" win over the original `cod_amount` when both are present. A missing

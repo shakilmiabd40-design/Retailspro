@@ -1,6 +1,6 @@
 import "server-only";
 import { query } from "../db";
-import { readCourierPaidAmount, readLatestRiderTrackingMessage } from "./steadfast-status";
+import { readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage } from "./steadfast-status";
 
 /**
  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
@@ -161,6 +161,7 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
 
   const cod = readCourierPaidAmount(raw, consignmentObj);
+  const deliveryCharge = readDeliveryCharge(raw, consignmentObj);
 
   return {
     ok: true,
@@ -172,7 +173,8 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
       // Status lookup responses commonly use { status: 200, delivery_status: "pending" }.
       // Prefer the courier status field so the HTTP code is never mistaken for parcel status.
       status: reportedStatus(raw, consignmentObj),
-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      // Omit an unreported charge entirely; defaulting it to 0 would erase the order's cost when synced.
+      ...(deliveryCharge !== null ? { delivery_charge: deliveryCharge } : {}),
       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
     },
   };
@@ -192,6 +194,7 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
   const raw = res.data as Record<string, unknown>;
   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
   const cod = readCourierPaidAmount(raw, consignmentObj);
+  const deliveryCharge = readDeliveryCharge(raw, consignmentObj);
   return {
     ok: true,
     data: {
@@ -199,7 +202,8 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
       ...raw,
       // Do not turn a COD value into a `collected_amount`; rider-note collection can override COD.
       status: reportedStatus(raw, consignmentObj),
-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
+      // Omit an unreported charge entirely; defaulting it to 0 would erase the order's cost when synced.
+      ...(deliveryCharge !== null ? { delivery_charge: deliveryCharge } : {}),
       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
     },
   };

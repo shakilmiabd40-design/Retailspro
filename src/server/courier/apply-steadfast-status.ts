@@ -5,7 +5,7 @@ import { bumpRev } from "@/server/seed";
 import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
 import { expectedCod, FINAL_STATUSES } from "@/lib/orders/utils";
 import type { Order } from "@/lib/orders/types";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge } from "./steadfast-status";
 import { COUNTER_START } from "@/server/collections";
 import { postAccountingChanges } from "@/server/accounting/auto-post";
 
@@ -106,7 +106,7 @@ export async function applyStatusToOrder(
 
   const rawStatus = normalizeSteadfastStatus(field("status"));
   const mapped = mapSteadfastStatus(rawStatus);
-  const charge = toAmount(field("delivery_charge"));
+  const charge = readDeliveryCharge(event, consignment);
   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
   // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
   // same already-final status, or carry no status at all.
@@ -115,8 +115,20 @@ export async function applyStatusToOrder(
   const rawHappenedAt = field("updated_at");
   const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
 
-  // The courier's confirmed forward charge is only known once it has the parcel.
-  if (charge !== null) order.courier = { ...order.courier, forwardCost: charge };
+  // The courier's confirmed forward charge is only known once it has the parcel. A status lookup
+  // often omits `delivery_charge` (or sends 0) while it isn't fixed yet — that must never erase the
+  // cost recorded at dispatch. If it is genuinely missing when the parcel reaches a delivery
+  // outcome, fall back to the order's delivery charge instead of leaving a partial delivery at 0.
+  if (charge !== null) {
+    order.courier = { ...order.courier, forwardCost: charge };
+  } else if (
+    !order.courier.forwardCost &&
+    order.deliveryCharge > 0 &&
+    (mapped === "delivered" || mapped === "partial_delivered" || mapped === "refuse_return" ||
+      order.status === "delivered" || order.status === "partial_delivered" || order.status === "refuse_return")
+  ) {
+    order.courier = { ...order.courier, forwardCost: order.deliveryCharge };
+  }
   if (rawStatus) order.courier = { ...order.courier, status: rawStatus };
 
   if (mapped === "in_transit" && !order.courier.dispatchDate) {

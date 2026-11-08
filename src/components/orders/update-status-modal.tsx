@@ -159,7 +159,7 @@ export function UpdateStatusModal({
       try {
         const res = await api<any>("GET", `/api/courier/steadfast?id=${encodeURIComponent(tracking)}`);
         const c = Number(res?.delivery_charge ?? res?.charge ?? res?.consignment?.delivery_charge ?? res?.consignment?.charge ?? NaN);
-        if (Number.isFinite(c) && c >= 0) charge = c;
+        if (Number.isFinite(c) && c > 0) charge = c;
       } catch {}
       recordSteadfastBooking(order.id, tracking, trimmedCompany);
       if (charge > 0) {
@@ -186,8 +186,9 @@ export function UpdateStatusModal({
         const s = String(res.status).toLowerCase();
         showToast(`Steadfast says: ${res.status}`);
         // Log all possible charge fields to find the right one
-        const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
-        setForwardCharge(charge);
+        const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? NaN);
+        // A missing/zero charge means Steadfast hasn't fixed it yet — keep the recorded forward cost.
+        if (Number.isFinite(charge) && charge > 0) setForwardCharge(charge);
         const collected = Number(
           res.cod_amount ??
             res.codAmount ??
@@ -206,11 +207,11 @@ export function UpdateStatusModal({
             NaN
         );
         if (s.includes("partial")) {
-          setOutcome("partial");
+          // Reuse the Partial tab's defaults (recorded collection → forward cost → 0), then use the
+          // amount Steadfast reported when it sent one. Unknown still leaves a safe starting value.
+          selectOutcome("partial");
           if (Number.isFinite(collected) && collected >= 0) {
             setCustomerPaid(collected);
-          } else if (Number.isFinite(charge) && charge >= 0) {
-            setCustomerPaid(charge);
           }
         } else if (s.includes("deliver")) {
           setOutcome("delivered");

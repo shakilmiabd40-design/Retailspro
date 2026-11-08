@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -39,6 +39,18 @@ test("return_list and returned also map to Refuse Return (parcel entering the re
   // Case/separator variants
   assert.equal(mapSteadfastStatus("Return_List"), "refuse_return");
   assert.equal(mapSteadfastStatus("RETURNED"), "refuse_return");
+});
+
+test("an unreported courier charge stays null instead of wiping the order's forward cost", () => {
+  assert.equal(readDeliveryCharge({ status: "partial_delivered" }), null);
+  assert.equal(readDeliveryCharge({ delivery_charge: 0 }), null);
+  assert.equal(readDeliveryCharge({ delivery_charge: "0.00" }), null);
+  assert.equal(readDeliveryCharge({ delivery_charge: "" }), null);
+  assert.equal(readDeliveryCharge({ delivery_charge: 120 }), 120);
+  assert.equal(readDeliveryCharge({ delivery_charge: "120.50" }), 120.5);
+  // A changed field in `values` wins, and the nested consignment is still read.
+  assert.equal(readDeliveryCharge({ delivery_charge: 100, values: { delivery_charge: 130 } }), 130);
+  assert.equal(readDeliveryCharge({}, { delivery_charge: 90 }), 90);
 });
 
 test("amounts may arrive as numbers or numeric strings, and missing stays null (not 0)", () => {

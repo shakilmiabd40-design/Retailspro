@@ -100,7 +100,7 @@ export const GET = route(async (req) => {
 
   return json({
     status: r.data.status || null,
-    delivery_charge: r.data.delivery_charge || 0,
+    delivery_charge: typeof r.data.delivery_charge === "number" && r.data.delivery_charge > 0 ? r.data.delivery_charge : null,
     cod_amount: (r.data as any).cod_amount ?? (r.data as any).codAmount ?? (r.data as any).collected_amount ?? (r.data as any).collectedAmount ?? (r.data as any).paid_amount ?? (r.data as any).paidAmount ?? null,
     consignment: r.data,
   });
