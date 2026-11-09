@@ -169,7 +169,7 @@ const OrdersContext = createContext<OrdersContextValue | null>(null);
 
 export function OrdersProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
-  const { reserveStock, releaseStock, consumeStock, restoreStock, products } = useProducts();
+  const { reserveStock, releaseStock, consumeStock, restoreStock, sellStock, products } = useProducts();
   const { createWarrantiesForOrder, voidWarrantiesForOrderItem } = useWarranty();
   const { settings } = useSettings();
   // Settings → Orders: when "Return Received" isn't mandatory, stock is released the moment the outcome is recorded.

@@ -2,7 +2,7 @@ import "server-only";
 import type { PoolClient } from "pg";
 import type { AccountingConfig, ChartOfAccount, InventoryCostLayer, InventoryMovement, JournalEntry, JournalLine, GrniEntry, StockAdjustment } from "@/lib/accounting/gl-types";
 import { DEFAULT_ACCOUNTING_CONFIG } from "@/lib/accounting/gl-types";
-import type { Order } from "@/lib/orders/types";
+import type { Order, OrderExchange, OrderItem } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
 import type { PurchaseOrder } from "@/lib/purchase-orders/types";
 import type { PosInvoice, PosReturn } from "@/lib/pos/types";
@@ -24,7 +24,7 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const safeId = (value: string) => `auto-${value}`.slice(0, 120);
 const dateOf = (value: string | undefined) => (value || new Date().toISOString()).slice(0, 10);
 
-async function insertRecord(client: PoolClient, collection: string, item: { id: string }, actor: string) {
+async function insertRecord<T extends { id: string }>(client: PoolClient, collection: string, item: T, actor: string) {
   const r = await client.query("insert into app_records (collection,id,data,updated_by) values ($1,$2,$3::jsonb,$4) on conflict (collection,id) do nothing returning id", [collection, item.id, JSON.stringify(item), actor]);
   return r.rows.length > 0;
 }
@@ -112,19 +112,19 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
     }
   }
 
-  const orderChanges = changes.orders ?? new Map();
+  const orderChanges: Map<string, Change<Order>> = changes.orders ?? new Map<string, Change<Order>>();
   for (const [orderId, change] of orderChanges) {
     const order = change.after;
     const prev = change.before;
     if (!order) continue;
-    const previousExchangeIds = new Set((prev?.exchanges ?? []).map((x) => x.id));
-    for (const exchange of (order.exchanges ?? []).filter((x) => !previousExchangeIds.has(x.id))) {
+    const previousExchangeIds = new Set((prev?.exchanges ?? []).map((x: OrderExchange) => x.id));
+    for (const exchange of (order.exchanges ?? []).filter((x: OrderExchange) => !previousExchangeIds.has(x.id))) {
       const date = dateOf(exchange.at);
-      const ref = `${order.orderNumber}-EX${(order.exchanges ?? []).findIndex((x) => x.id === exchange.id) + 1}`;
+      const ref = `${order.orderNumber}-EX${(order.exchanges ?? []).findIndex((x: OrderExchange) => x.id === exchange.id) + 1}`;
       const lines: JournalEntryInputLine[] = [];
       const movements: InventoryMovement[] = [];
       for (const [index, item] of exchange.returned.entries()) {
-        const source = order.items.find((x) => x.id === item.itemId);
+        const source = order.items.find((x: OrderItem) => x.id === item.itemId);
         if (!source) throw new Error(`Returned order item is missing for exchange ${ref}.`);
         const product = await getProduct(source.productId);
         if (!product) throw new Error(`Product ${source.productId} is missing for exchange ${ref}.`);
