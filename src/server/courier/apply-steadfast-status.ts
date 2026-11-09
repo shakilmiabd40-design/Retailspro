@@ -104,7 +104,8 @@ export async function applyStatusToOrder(
     : null;
   const field = (key: string) => values?.[key] ?? event[key] ?? consignment?.[key];
 
-  const rawStatus = normalizeSteadfastStatus(field("status"));
+  // Steadfast documents `status`; some callback versions use `delivery_status`.
+  const rawStatus = normalizeSteadfastStatus(field("status")) || normalizeSteadfastStatus(field("delivery_status"));
   const mapped = mapSteadfastStatus(rawStatus);
   const charge = readDeliveryCharge(event, consignment);
   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery

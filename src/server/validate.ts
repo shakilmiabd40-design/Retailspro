@@ -86,6 +86,39 @@ export function validateOrder(data: unknown): void {
       }
     });
   }
+  if (o.exchanges !== undefined) {
+    if (!Array.isArray(o.exchanges)) invalid("exchanges", "exchanges must be an array.");
+    if (o.exchanges.length && o.status !== "delivered") invalid("exchanges", "Only delivered orders can have exchanges.");
+    const itemLimits = new Map((Array.isArray(o.items) ? o.items : []).map((item) => [item.id, item.qty] as const));
+    const exchangedQty = new Map<string, number>();
+    for (const [idx, raw] of o.exchanges.entries()) {
+      if (!isObj(raw) || typeof raw.id !== "string" || typeof raw.at !== "string" || typeof raw.by !== "string" || !Array.isArray(raw.returned) || !raw.returned.length || !Array.isArray(raw.given) || !raw.given.length) invalid(`exchanges[${idx}]`, `exchanges[${idx}] is invalid.`);
+      let returnedValue = 0;
+      for (const returned of raw.returned) {
+        if (!isObj(returned) || typeof returned.itemId !== "string" || !itemLimits.has(returned.itemId) || typeof returned.qty !== "number" || typeof returned.unitValue !== "number" || !Number.isFinite(returned.unitValue)) invalid(`exchanges[${idx}].returned`, "An exchanged returned item must refer to an order line and include valid quantities and values.");
+        positiveInt(returned.qty, `exchanges[${idx}].returned.qty`);
+        nonNegative(returned.unitValue, `exchanges[${idx}].returned.unitValue`);
+        const qty = Number(returned.qty);
+        const total = (exchangedQty.get(returned.itemId) ?? 0) + qty;
+        if (total > (itemLimits.get(returned.itemId) ?? 0)) invalid(`exchanges[${idx}].returned.qty`, "Exchanged quantity cannot exceed the delivered quantity.");
+        exchangedQty.set(returned.itemId, total);
+        returnedValue += Number(returned.unitValue) * qty;
+      }
+      let givenValue = 0;
+      for (const given of raw.given) {
+        if (!isObj(given) || typeof given.qty !== "number" || typeof given.price !== "number" || typeof given.discount !== "number" || !Number.isFinite(given.price) || !Number.isFinite(given.discount)) invalid(`exchanges[${idx}].given`, "Replacement item is invalid.");
+        positiveInt(given.qty, `exchanges[${idx}].given.qty`);
+        nonNegative(given.price, `exchanges[${idx}].given.price`);
+        nonNegative(given.discount, `exchanges[${idx}].given.discount`);
+        if (Number(given.discount) > Number(given.price) * Number(given.qty) + EPSILON) invalid(`exchanges[${idx}].given.discount`, "Replacement discount cannot exceed its line total.");
+        givenValue += Number(given.price) * Number(given.qty) - Number(given.discount);
+      }
+      if (typeof raw.returnedValue !== "number" || typeof raw.givenValue !== "number" || !Number.isFinite(raw.returnedValue) || !Number.isFinite(raw.givenValue)) invalid(`exchanges[${idx}]`, "Exchange totals must be valid amounts.");
+      nonNegative(raw.returnedValue, `exchanges[${idx}].returnedValue`);
+      nonNegative(raw.givenValue, `exchanges[${idx}].givenValue`);
+      if (typeof raw.cashDifference !== "number" || !Number.isFinite(raw.cashDifference) || Math.abs(raw.cashDifference - (givenValue - returnedValue)) > EPSILON || Math.abs(raw.returnedValue - returnedValue) > EPSILON || Math.abs(raw.givenValue - givenValue) > EPSILON) invalid(`exchanges[${idx}].cashDifference`, "Exchange values and cash difference do not balance.");
+    }
+  }
 }
 
 export function validateProduct(data: unknown): void {

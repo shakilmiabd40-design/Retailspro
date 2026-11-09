@@ -32,8 +32,8 @@ import {
 export default function OrderDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { getOrder, hydrated, markReturnReceived, updateCourierCharges, updateCustomerPaid, deleteOrder } = useOrders();
-  const { getProduct } = useProducts();
+  const { getOrder, hydrated, markReturnReceived, updateCourierCharges, updateCustomerPaid, exchangeDeliveredOrder, deleteOrder } = useOrders();
+  const { getProduct, products } = useProducts();
   const showToast = useToast();
   const order = getOrder(params.id);
 
@@ -49,6 +49,11 @@ export default function OrderDetailsPage() {
   const [paidOpen, setPaidOpen] = useState(false);
   const [customerPaid, setCustomerPaid] = useState(0);
   const [syncingCourier, setSyncingCourier] = useState(false);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+  const [exchangeReturnItem, setExchangeReturnItem] = useState("");
+  const [exchangeReturnQty, setExchangeReturnQty] = useState(1);
+  const [exchangeVariantId, setExchangeVariantId] = useState("");
+  const [exchangeQty, setExchangeQty] = useState(1);
 
   if (!hydrated) {
     return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
@@ -146,6 +151,11 @@ export default function OrderDetailsPage() {
               Cancel Order
             </button>
           )}
+          {order.status === "delivered" && (
+            <button onClick={() => setExchangeOpen((open) => !open)} className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+              <RefreshCcw size={14} /> Exchange Items
+            </button>
+          )}
           <Link
             href={`/orders/${order.id}/edit`}
             className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"
@@ -175,6 +185,36 @@ export default function OrderDetailsPage() {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
         <div className="space-y-5">
+          {exchangeOpen && order.status === "delivered" && <section className="card p-5">
+            <p className="mb-1 text-[14px] font-semibold" style={{ color: "var(--text)" }}>Exchange delivered items</p>
+            <p className="mb-4 text-[12px]" style={{ color: "var(--text-muted)" }}>Returned pairs go back into stock. Replacement pairs are deducted. Price difference is recorded as collected or refunded.</p>
+            <div className="space-y-3">
+              <label className="block text-[12px]" style={{ color: "var(--text-muted)" }}>Item returned
+                <select value={exchangeReturnItem} onChange={(e) => { setExchangeReturnItem(e.target.value); setExchangeReturnQty(1); }} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}>
+                  <option value="">Choose delivered item</option>
+                  {order.items.map((item) => { const already = (order.exchanges ?? []).flatMap((x) => x.returned).filter((x) => x.itemId === item.id).reduce((n, x) => n + x.qty, 0); const left = item.qty - already; return left > 0 ? <option key={item.id} value={item.id}>{item.productName} · {item.color}/{item.size} · {left} available to exchange</option> : null; })}
+                </select>
+              </label>
+              <label className="block text-[12px]" style={{ color: "var(--text-muted)" }}>Quantity returned
+                <input type="number" min={1} max={Math.max(1, (order.items.find((i) => i.id === exchangeReturnItem)?.qty ?? 1) - (order.exchanges ?? []).flatMap((x) => x.returned).filter((x) => x.itemId === exchangeReturnItem).reduce((n, x) => n + x.qty, 0))} value={exchangeReturnQty} onChange={(e) => setExchangeReturnQty(Number(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }} />
+              </label>
+              <label className="block text-[12px]" style={{ color: "var(--text-muted)" }}>Replacement product / variant
+                <select value={exchangeVariantId} onChange={(e) => { setExchangeVariantId(e.target.value); setExchangeQty(1); }} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}>
+                  <option value="">Choose replacement</option>
+                  {products.filter((p) => p.status === "active").flatMap((p) => p.variants.filter((v) => v.status === "active").map((v) => <option key={v.id} value={v.id}>{p.name} · {v.color}/{v.size} · stock {v.stock - (v.reserved ?? 0)} · ৳{p.discountPrice ?? v.price}</option>))}
+                </select>
+              </label>
+              <label className="block text-[12px]" style={{ color: "var(--text-muted)" }}>Replacement quantity
+                <input type="number" min={1} value={exchangeQty} onChange={(e) => setExchangeQty(Number(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }} />
+              </label>
+              {(() => { const original = order.items.find((i) => i.id === exchangeReturnItem); const variant = products.flatMap((p) => p.variants.map((v) => ({ p, v }))).find(({ v }) => v.id === exchangeVariantId); const returnedValue = original ? (original.price - original.discount / original.qty) * exchangeReturnQty : 0; const givenValue = variant ? (variant.p.discountPrice ?? variant.v.price) * exchangeQty : 0; const delta = givenValue - returnedValue; return <p className="rounded-lg p-3 text-[12px]" style={{ background: "var(--surface-2)", color: "var(--text)" }}>Difference: {delta >= 0 ? `Collect ৳${delta.toLocaleString()}` : `Refund ৳${Math.abs(delta).toLocaleString()}`}</p>; })()}
+              <div className="flex gap-2">
+                <button onClick={() => { const original = order.items.find((i) => i.id === exchangeReturnItem); const match = products.flatMap((p) => p.variants.map((v) => ({ p, v }))).find(({ v }) => v.id === exchangeVariantId); if (!original || !match) { showToast("Choose the returned item and replacement product.", "error"); return; } const result = exchangeDeliveredOrder(order.id, [{ itemId: original.id, qty: exchangeReturnQty }], [{ productId: match.p.id, productName: match.p.name, variantId: match.v.id, color: match.v.color, size: match.v.size, sku: match.v.sku, price: match.p.discountPrice ?? match.v.price, qty: exchangeQty, discount: 0 }]); if (!result.ok) showToast(result.error, "error"); else { showToast("Exchange recorded; stock updated."); setExchangeOpen(false); setExchangeReturnItem(""); setExchangeVariantId(""); } }} className="focus-ring rounded-lg px-3 py-2 text-[12px] font-semibold text-white" style={{ background: "var(--brand)" }}>Save Exchange</button>
+                <button onClick={() => setExchangeOpen(false)} className="focus-ring rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>Close</button>
+              </div>
+            </div>
+          </section>}
+          {!!order.exchanges?.length && <section className="card p-5"><p className="mb-3 text-[14px] font-semibold" style={{ color: "var(--text)" }}>Exchange History</p><div className="space-y-3">{order.exchanges.map((exchange) => <div key={exchange.id} className="border-b pb-3 last:border-0" style={{ borderColor: "var(--border)" }}><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>{formatOrderDate(exchange.at)} · {exchange.by}</p><p className="mt-1 text-[12.5px]" style={{ color: "var(--text)" }}>Returned {exchange.returned.map((r) => { const i = order.items.find((x) => x.id === r.itemId); return `${r.qty} × ${i?.productName ?? "item"}`; }).join(", ")}</p><p className="text-[12.5px]" style={{ color: "var(--text)" }}>Given {exchange.given.map((i) => `${i.qty} × ${i.productName} (${i.color}/${i.size})`).join(", ")}</p><p className="mt-1 text-[12px] font-medium" style={{ color: "var(--brand)" }}>{exchange.cashDifference >= 0 ? `Collected ৳${exchange.cashDifference.toLocaleString()}` : `Refunded ৳${Math.abs(exchange.cashDifference).toLocaleString()}`}</p></div>)}</div></section>}
           {/* Customer Information */}
           <section className="card p-5">
             <p className="mb-3 text-[14px] font-semibold" style={{ color: "var(--text)" }}>

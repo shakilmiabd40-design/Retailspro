@@ -17,6 +17,7 @@ import type {
   CourierInfo,
   DeliveryResult,
   Order,
+  OrderExchange,
   OrderItem,
   OrderStatus,
   ReturnInfo,
@@ -148,6 +149,7 @@ interface OrdersContextValue {
   updateCourierCharges: (id: string, input: CourierChargesInput) => { ok: true } | { ok: false; error: string };
   /** Corrects the amount actually collected by the courier on a delivered order. */
   updateCustomerPaid: (id: string, amount: number) => { ok: true } | { ok: false; error: string };
+  exchangeDeliveredOrder: (id: string, returned: { itemId: string; qty: number }[], given: Omit<OrderItem, "id">[]) => { ok: true; exchange: OrderExchange } | { ok: false; error: string };
   cancelOrder: (id: string, input: CancelInput) => { ok: true } | { ok: false; error: string };
   /** Super Admin: edit any order at any status. Stock and warranties are reconciled automatically. */
   editOrder: (id: string, input: EditOrderInput) => { ok: true } | { ok: false; error: string };
@@ -490,6 +492,48 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }
 
+  function exchangeDeliveredOrder(id: string, returned: { itemId: string; qty: number }[], given: Omit<OrderItem, "id">[]): { ok: true; exchange: OrderExchange } | { ok: false; error: string } {
+    const order = getOrder(id);
+    if (!order || order.status !== "delivered") return { ok: false, error: "Exchanges are available for delivered orders." };
+    if (!returned.length || !given.length || returned.some((x) => !Number.isInteger(x.qty) || x.qty < 1) || given.some((x) => !Number.isInteger(x.qty) || x.qty < 1)) return { ok: false, error: "Choose returned and replacement products with whole quantities." };
+    const returnedQty = new Map<string, number>();
+    for (const ex of order.exchanges ?? []) for (const item of ex.returned) returnedQty.set(item.itemId, (returnedQty.get(item.itemId) ?? 0) + item.qty);
+    const requestedReturned = new Map<string, number>();
+    const returnedLines: OrderExchange["returned"] = [];
+    for (const line of returned) {
+      const original = order.items.find((i) => i.id === line.itemId);
+      const totalReturned = (requestedReturned.get(line.itemId) ?? 0) + line.qty;
+      if (!original || totalReturned > original.qty - (returnedQty.get(line.itemId) ?? 0)) return { ok: false, error: "Returned quantity exceeds the unexchanged quantity on this order." };
+      requestedReturned.set(line.itemId, totalReturned);
+      const product = products.find((p) => p.id === original.productId);
+      const variant = product?.variants.find((v) => v.id === original.variantId);
+      if (!variant) return { ok: false, error: `${original.productName} is no longer in the catalogue.` };
+      returnedLines.push({ itemId: line.itemId, qty: line.qty, unitValue: Math.max(0, original.price - original.discount / original.qty) });
+    }
+    const givenLines: OrderExchange["given"] = [];
+    const requestedGiven = new Map<string, number>();
+    for (const line of given) {
+      const product = products.find((p) => p.id === line.productId);
+      const variant = product?.variants.find((v) => v.id === line.variantId);
+      if (!variant) return { ok: false, error: `${line.productName} (${line.color}/${line.size}) is no longer available.` };
+      const key = `${line.productId}:${line.variantId}`;
+      const demand = (requestedGiven.get(key) ?? 0) + line.qty;
+      const available = variant.stock - (variant.reserved ?? 0) + returnedLines.filter((r) => { const source = order.items.find((i) => i.id === r.itemId); return source?.productId === line.productId && source.variantId === variant.id; }).reduce((n, r) => n + r.qty, 0);
+      if (demand > available) return { ok: false, error: `Only ${Math.max(0, available)} available for ${line.productName} (${line.color}/${line.size}).` };
+      requestedGiven.set(key, demand);
+      if (!Number.isFinite(line.price) || line.price < 0 || !Number.isFinite(line.discount) || line.discount < 0 || line.discount > line.price * line.qty) return { ok: false, error: "Replacement prices or discounts are invalid." };
+      givenLines.push({ ...line, id: crypto.randomUUID() });
+    }
+    const roundMoney = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const returnedValue = roundMoney(returnedLines.reduce((sum, i) => sum + i.unitValue * i.qty, 0));
+    const givenValue = roundMoney(givenLines.reduce((sum, i) => sum + i.price * i.qty - i.discount, 0));
+    const exchange: OrderExchange = { id: crypto.randomUUID(), at: new Date().toISOString(), returned: returnedLines, given: givenLines, returnedValue, givenValue, cashDifference: roundMoney(givenValue - returnedValue), by: runtime.actor.name };
+    restoreStock(returnedLines.map((r) => { const i = order.items.find((x) => x.id === r.itemId)!; return { productId: i.productId, variantId: i.variantId, qty: r.qty }; }));
+    sellStock(givenLines.map((i) => ({ productId: i.productId, variantId: i.variantId, qty: i.qty })));
+    updateOrder(id, (o) => ({ ...o, exchanges: [...(o.exchanges ?? []), exchange], activity: [...o.activity, activity("Order exchange", `Returned ৳${returnedValue.toLocaleString()} · replacement ৳${givenValue.toLocaleString()} · ${exchange.cashDifference >= 0 ? `collected ৳${exchange.cashDifference.toLocaleString()}` : `refunded ৳${Math.abs(exchange.cashDifference).toLocaleString()}`}`)] }));
+    return { ok: true, exchange };
+  }
+
   function editOrder(id: string, input: EditOrderInput): { ok: true } | { ok: false; error: string } {
     const order = getOrder(id);
     if (!order) return { ok: false, error: "Order not found." };
@@ -683,6 +727,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       markReturnReceived,
       updateCourierCharges,
       updateCustomerPaid,
+      exchangeDeliveredOrder,
       cancelOrder,
       editOrder,
       deleteOrder,

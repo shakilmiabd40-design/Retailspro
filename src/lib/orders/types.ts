@@ -76,6 +76,18 @@ export interface ActivityEntry {
   by?: string;
 }
 
+export interface OrderExchange {
+  id: string;
+  at: string;
+  returned: { itemId: string; qty: number; unitValue: number }[];
+  given: OrderItem[];
+  returnedValue: number;
+  givenValue: number;
+  /** Positive means customer paid; negative means money refunded. */
+  cashDifference: number;
+  by: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -110,6 +122,7 @@ export interface Order {
   returnInfo: ReturnInfo;
   cancellation: CancellationInfo;
   activity: ActivityEntry[];
+  exchanges?: OrderExchange[];
 
   createdAt: string;
   updatedAt: string;

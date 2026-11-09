@@ -117,6 +117,43 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
     const order = change.after;
     const prev = change.before;
     if (!order) continue;
+    const previousExchangeIds = new Set((prev?.exchanges ?? []).map((x) => x.id));
+    for (const exchange of (order.exchanges ?? []).filter((x) => !previousExchangeIds.has(x.id))) {
+      const date = dateOf(exchange.at);
+      const ref = `${order.orderNumber}-EX${(order.exchanges ?? []).findIndex((x) => x.id === exchange.id) + 1}`;
+      const lines: JournalEntryInputLine[] = [];
+      const movements: InventoryMovement[] = [];
+      for (const [index, item] of exchange.returned.entries()) {
+        const source = order.items.find((x) => x.id === item.itemId);
+        if (!source) throw new Error(`Returned order item is missing for exchange ${ref}.`);
+        const product = await getProduct(source.productId);
+        if (!product) throw new Error(`Product ${source.productId} is missing for exchange ${ref}.`);
+        const { rows: saleCostRows } = await client.query<{ data: InventoryMovement }>("select data from app_records where collection='inventory_movements' and data->>'referenceType'='sale' and data->>'referenceId'=$1 and data->>'variantId'=$2 order by data->>'date',id", [order.orderNumber, source.variantId]);
+        const originalQty = saleCostRows.reduce((sum, row) => sum + row.data.qty, 0);
+        const originalCost = originalQty > 0 ? saleCostRows.reduce((sum, row) => sum + row.data.totalCost, 0) / originalQty : product.variants.find((v) => v.id === source.variantId)?.cost ?? product.costPrice;
+        const amount = round2(originalCost * item.qty);
+        lines.push({ code: inventoryCode(product), debit: amount, credit: 0 }, { code: cogsCode(product), debit: 0, credit: amount });
+        await insertRecord(client, "inventory_cost_layers", { id: safeId(`order-exchange-layer-${exchange.id}-${index}`), productId: source.productId, variantId: source.variantId, qty: item.qty, remainingQty: item.qty, unitCost: originalCost, totalCost: amount, landedCost: 0, receivedAt: date, source: "adjustment_in", sourceId: exchange.id }, actor);
+        movements.push({ id: safeId(`order-exchange-return-${exchange.id}-${index}`), date, type: "return_in", productId: source.productId, variantId: source.variantId, qty: item.qty, unitCost: originalCost, totalCost: amount, referenceType: "order_exchange", referenceId: ref, createdAt: new Date().toISOString(), createdBy: actor });
+      }
+      for (const [index, item] of exchange.given.entries()) {
+        const product = await getProduct(item.productId);
+        if (!product) throw new Error(`Product ${item.productId} is missing for exchange ${ref}.`);
+        const { rows } = await client.query<{ id: string; data: InventoryCostLayer; version: number }>("select id,data,version from app_records where collection='inventory_cost_layers' and data->>'variantId'=$1 and (data->>'remainingQty')::numeric>0 order by data->>'receivedAt',id for update", [item.variantId]);
+        const fifo = consumeFifo(rows.map((r) => r.data), item.qty, product.variants.find((v) => v.id === item.variantId)?.cost ?? product.costPrice);
+        for (const row of rows) { const next = fifo.layers.find((l) => l.id === row.id); if (next && next.remainingQty !== row.data.remainingQty) await client.query("update app_records set data=$3::jsonb,version=version+1,updated_at=now(),updated_by=$4 where collection='inventory_cost_layers' and id=$1 and version=$2", [row.id, row.version, JSON.stringify(next), actor]); }
+        lines.push({ code: cogsCode(product), debit: fifo.totalCost, credit: 0 }, { code: inventoryCode(product), debit: 0, credit: fifo.totalCost });
+        movements.push({ id: safeId(`order-exchange-given-${exchange.id}-${index}`), date, type: "sale", productId: item.productId, variantId: item.variantId, qty: item.qty, unitCost: fifo.unitCost, totalCost: fifo.totalCost, estimatedCost: fifo.estimatedQty > 0, referenceType: "order_exchange", referenceId: ref, createdAt: new Date().toISOString(), createdBy: actor });
+      }
+      lines.push({ code: "4020", debit: exchange.returnedValue, credit: 0 }, { code: "4010", debit: 0, credit: exchange.givenValue });
+      if (exchange.cashDifference > 0) lines.push({ code: "1010", debit: exchange.cashDifference, credit: 0 });
+      if (exchange.cashDifference < 0) lines.push({ code: "1010", debit: 0, credit: Math.abs(exchange.cashDifference) });
+      const entry = lines.some((line) => line.debit > 0 || line.credit > 0)
+        ? await insertJournal({ id: `AUTO-ORDER-EXCHANGE-${order.orderNumber}-${exchange.id}`, source: "return", sourceId: `${orderId}:exchange:${exchange.id}`, date, ref, narration: `Delivered order exchange · ${ref}`, lines })
+        : null;
+      for (const movement of movements) { if (entry) movement.journalEntryId = entry.id; await insertRecord(client, "inventory_movements", movement, actor); }
+      if (movements.length) { await bumpRev(client, "inventory_movements"); await bumpRev(client, "inventory_cost_layers"); }
+    }
     if (order.status === "refuse_return") {
       const firstRefusal = prev?.status !== "refuse_return";
       const costChanged = prev?.status === "refuse_return" && actualCourierCost(prev) !== actualCourierCost(order);
