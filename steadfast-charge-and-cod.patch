@@ -1,0 +1,310 @@
+diff --git a/src/app/api/courier/steadfast/open/route.ts b/src/app/api/courier/steadfast/open/route.ts
+index 0d23a1f..9cc26b5 100644
+--- a/src/app/api/courier/steadfast/open/route.ts
++++ b/src/app/api/courier/steadfast/open/route.ts
+@@ -5,14 +5,14 @@ import { ApiError, json, route } from "@/server/http";
+ 
+ export const dynamic = "force-dynamic";
+ 
+-/** Lightweight candidate list for the missed-webhook fallback; full orders stay in the database. */
++/** Lightweight candidate list for the missed-webhook fallback (parcels still with the courier: Processing and In Transit); full orders stay in the database. */
+ export const GET = route(async (req) => {
+   const auth = await requireAuth(req, { passive: true });
+   if (!canRead(auth.role, COLLECTION_ACCESS.orders)) throw new ApiError(403, "forbidden", "You do not have access to orders.");
+   const { rows } = await query<{ id: string; orderNumber: string; company: string }>(
+     `select id, data->>'orderNumber' as "orderNumber", data #>> '{courier,company}' as company
+-     from app_records where collection='orders' and data->>'status'='processing'
+-       and coalesce(data #>> '{courier,trackingId}','') <> '' order by seq desc limit 200`,
++     from app_records where collection='orders' and data->>'status' in ('processing','in_transit')
++       and coalesce(data #>> '{courier,trackingId}','') <> '' order by seq desc limit 30`,
+   );
+   return json({ rows });
+ });
+diff --git a/src/app/api/courier/steadfast/sync/route.ts b/src/app/api/courier/steadfast/sync/route.ts
+index f90fc88..d226c78 100644
+--- a/src/app/api/courier/steadfast/sync/route.ts
++++ b/src/app/api/courier/steadfast/sync/route.ts
+@@ -68,6 +68,10 @@ export const POST = route(async (req) => {
+   });
+   if (!result) throw new ApiError(404, "not_found", "The order disappeared while syncing.");
+ 
++  console.log(
++    `[steadfast][sync] ${orderNumber || trackingId}: steadfast=${String(remote.data.status ?? "—")} charge=${String(remote.data.delivery_charge ?? "—")} note=${String(statusPayload.tracking_message ?? "—").slice(0, 160)} → order=${result.orderStatus} paid=${result.customerPaid ?? "—"} ${result.changed ? "updated" : "no change"}`
++  );
++
+   if (result.queuedEvents > 0) {
+     after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
+   }
+diff --git a/src/app/api/courier/steadfast/webhook/route.ts b/src/app/api/courier/steadfast/webhook/route.ts
+index 9dd6e52..abe9f20 100644
+--- a/src/app/api/courier/steadfast/webhook/route.ts
++++ b/src/app/api/courier/steadfast/webhook/route.ts
+@@ -87,7 +87,13 @@ export async function POST(req: NextRequest) {
+   const type = typeof event.notification_type === "string" ? event.notification_type.trim().toLowerCase() : "delivery_status";
+ 
+   // ── Events that carry a consignment status or amount revision ──────────────
+-  const isStatusEvent = type === "delivery_status" || type === "tracking_update" || type === "consignment_update";
++  // `return_list` means the parcel was added to Steadfast's return manifest — i.e. it is coming back. When
++  // the event identifies a parcel, apply it as a return status instead of only logging it (the order would
++  // otherwise stay In Transit forever, because no separate delivery_status push is guaranteed to follow).
++  const returnConsignment = event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment) ? (event.consignment as Record<string, unknown>) : null;
++  const returnListWithParcel = type === "return_list" && !!(event.invoice || event.consignment_id || returnConsignment?.invoice || returnConsignment?.consignment_id || returnConsignment?.id);
++  if (returnListWithParcel && !event.status) event = { ...event, status: "return_list" };
++  const isStatusEvent = type === "delivery_status" || type === "tracking_update" || type === "consignment_update" || returnListWithParcel;
+ 
+   // ── Steadfast lifecycle / request notification types ───────────────────────
+   // These inform us of workflow state changes on Steadfast's side. Steadfast
+@@ -108,7 +114,7 @@ export async function POST(req: NextRequest) {
+     "pickup_request",
+     "user_update",
+   ] as const;
+-  const isLifecycleEvent = (LIFECYCLE_TYPES as readonly string[]).includes(type);
++  const isLifecycleEvent = !isStatusEvent && (LIFECYCLE_TYPES as readonly string[]).includes(type);
+ 
+   if (!isStatusEvent && !isLifecycleEvent) {
+     console.log(`[steadfast] ignoring unknown notification_type=${type}`);
+@@ -166,7 +172,7 @@ export async function POST(req: NextRequest) {
+ 
+     if (!result) {
+       // Probably an order created outside RetailsPro — acknowledge so Steadfast stops retrying.
+-      console.warn(`[steadfast] no order matched invoice=${invoice || "—"} consignment=${consignmentId || "—"}`);
++      console.warn(`[steadfast] NO ORDER MATCHED invoice=${invoice || "—"} consignment=${consignmentId || "—"} | payload=${rawBody.slice(0, 600)}`);
+       return NextResponse.json({ status: "received" });
+     }
+ 
+@@ -179,7 +185,7 @@ export async function POST(req: NextRequest) {
+     }
+ 
+     console.log(
+-      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? values?.status ?? "—")} cod=${String(result.reportedCodAmount ?? "—")} → ${result.changed ? "updated" : "no change"}` +
++      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? values?.status ?? "—")} charge=${String(event.delivery_charge ?? values?.delivery_charge ?? "—")} cod=${String(result.reportedCodAmount ?? "—")} order=${result.orderStatus} → ${result.changed ? "updated" : "no change"} | payload=${rawBody.slice(0, 500)}` +
+         (result.queuedEvents ? `, ${result.queuedEvents} webhook event(s) queued` : "")
+     );
+   } catch (err) {
+diff --git a/src/components/orders/steadfast-auto-sync.tsx b/src/components/orders/steadfast-auto-sync.tsx
+index d62e7de..1eb3a76 100644
+--- a/src/components/orders/steadfast-auto-sync.tsx
++++ b/src/components/orders/steadfast-auto-sync.tsx
+@@ -44,8 +44,9 @@ export function SteadfastAutoSync() {
+         inFlight.current.add(order.id);
+         try {
+           const result = await api<{ status: string; changed: boolean; orderStatus: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
+-          if (active && result.orderStatus === "in_transit" && result.changed) {
+-            toast(`Order #${order.orderNumber} moved to In Transit (Steadfast: ${result.status})`, "success");
++          if (active && result.changed) {
++            const label = result.orderStatus.replace(/_/g, " ");
++            toast(`Order #${order.orderNumber} moved to ${label} (Steadfast: ${result.status})`, "success");
+           }
+         } catch {
+           // Transient failures are retried on the next poll; manual sync remains available on the order.
+diff --git a/src/components/orders/update-status-modal.tsx b/src/components/orders/update-status-modal.tsx
+index 40df594..5598501 100644
+--- a/src/components/orders/update-status-modal.tsx
++++ b/src/components/orders/update-status-modal.tsx
+@@ -186,7 +186,9 @@ export function UpdateStatusModal({
+         const s = String(res.status).toLowerCase();
+         showToast(`Steadfast says: ${res.status}`);
+         // Log all possible charge fields to find the right one
+-        const charge = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
++        // Steadfast's status lookup doesn't report a charge; 0/missing must not wipe the one already recorded.
++        const reported = Number(res.delivery_charge ?? res.charge ?? res.consignment?.delivery_charge ?? res.consignment?.charge ?? 0);
++        const charge = Number.isFinite(reported) && reported > 0 ? reported : order.courier.forwardCost || 0;
+         setForwardCharge(charge);
+         const collected = Number(
+           res.cod_amount ??
+diff --git a/src/server/courier/apply-steadfast-status.ts b/src/server/courier/apply-steadfast-status.ts
+index 14774dc..39517c6 100644
+--- a/src/server/courier/apply-steadfast-status.ts
++++ b/src/server/courier/apply-steadfast-status.ts
+@@ -5,7 +5,7 @@ import { bumpRev } from "@/server/seed";
+ import { enqueueEvents, orderEvents } from "@/server/publicapi/webhooks";
+ import { expectedCod, FINAL_STATUSES } from "@/lib/orders/utils";
+ import type { Order } from "@/lib/orders/types";
+-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, toAmount } from "./steadfast-status";
++import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge } from "./steadfast-status";
+ import { COUNTER_START } from "@/server/collections";
+ import { postAccountingChanges } from "@/server/accounting/auto-post";
+ 
+@@ -74,6 +74,17 @@ export async function loadOrderForConsignment(
+   return null;
+ }
+ 
++/** The courier's default forward cost from Settings → Courier & Settlement (null when unset or zero). */
++async function defaultSteadfastForwardCost(client: PoolClient, company: string | undefined): Promise<number | null> {
++  const { rows } = await client.query<{ couriers: { id?: string; name?: string; defaultForwardCost?: number }[] | null }>(
++    "select data->'courier'->'couriers' as couriers from app_documents where key = 'settings' limit 1"
++  );
++  const name = (company ?? "").trim().toLowerCase();
++  const hit = (rows[0]?.couriers ?? []).find((c) => c.id === "cr-steadfast" || (c.name ?? "").trim().toLowerCase() === (name || "steadfast"));
++  const cost = Number(hit?.defaultForwardCost);
++  return Number.isFinite(cost) && cost > 0 ? cost : null;
++}
++
+ const LABELS: Record<string, string> = {
+   in_transit: "Marked In Transit (Steadfast)",
+   delivered: "Marked Delivered (Steadfast)",
+@@ -106,16 +117,30 @@ export async function applyStatusToOrder(
+ 
+   const rawStatus = normalizeSteadfastStatus(field("status"));
+   const mapped = mapSteadfastStatus(rawStatus);
+-  const charge = toAmount(field("delivery_charge"));
++  // Only a positive figure counts as "reported" — 0/missing must not wipe a charge we already have.
++  const charge = readDeliveryCharge({ ...(consignment ?? {}), ...event, ...(values ?? {}) });
+   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
+   // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
+   // same already-final status, or carry no status at all.
+-  const cod = readCourierPaidAmount(event, consignment);
++  const reportedCod = readCourierPaidAmount(event, consignment);
++  // Steadfast's own partial_delivered push repeats the ORIGINAL full cod_amount (your logs: ORD-11093 → 2490) and
++  // only later revises it to what the customer really paid. A full-COD figure with no rider note or collected
++  // amount is therefore a placeholder, not money received — don't record it as Customer Paid.
++  const withoutCod = (src: Record<string, unknown> | null | undefined) =>
++    src ? { ...src, cod_amount: undefined, codAmount: undefined, amount: undefined } : src;
++  const codIsPlaceholder =
++    mapped === "partial_delivered" &&
++    !values &&
++    reportedCod !== null &&
++    Math.abs(reportedCod - expectedCod(order)) < 0.5 &&
++    readCourierPaidAmount(withoutCod(event) as Record<string, unknown>, withoutCod(consignment)) === null;
++  const cod = codIsPlaceholder ? null : reportedCod;
+   const message = typeof field("tracking_message") === "string" ? String(field("tracking_message")).trim() : "";
+   const rawHappenedAt = field("updated_at");
+   const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
+ 
+-  // The courier's confirmed forward charge is only known once it has the parcel.
++  // The courier's confirmed forward charge is only known once it has the parcel. A reported charge
++  // always wins; a missing/zero one never erases what is already recorded (partial deliveries often omit it).
+   if (charge !== null) order.courier = { ...order.courier, forwardCost: charge };
+   if (rawStatus) order.courier = { ...order.courier, status: rawStatus };
+ 
+@@ -123,6 +148,15 @@ export async function applyStatusToOrder(
+     order.courier = { ...order.courier, dispatchDate: happenedAt.slice(0, 10) };
+   }
+ 
++  // Processing → In Transit: Steadfast's status lookup never returns a charge, so when the event didn't
++  // carry one, book the courier's configured default forward cost now (a later webhook with the real
++  // charge replaces it).
++  let estimatedCharge: number | null = null;
++  if (mapped === "in_transit" && charge === null && !(order.courier.forwardCost > 0)) {
++    estimatedCharge = await defaultSteadfastForwardCost(client, order.courier.company);
++    if (estimatedCharge !== null) order.courier = { ...order.courier, forwardCost: estimatedCharge };
++  }
++
+   // Never walk a finished order backwards (e.g. a late "pending" event after delivery).
+   if (mapped && !FINAL_STATUSES.includes(order.status)) {
+     if (mapped === "in_transit") {
+@@ -164,11 +198,14 @@ export async function applyStatusToOrder(
+   const label = mapped ? LABELS[mapped] : LABELS.none;
+   const codDetail = codChanged ? `Customer Paid changed ৳${(prev.delivery.customerPaid || expectedCod(prev)).toLocaleString()} → ৳${cod.toLocaleString()}` : "";
+   const statusDetail = rawStatus ? `Steadfast status: ${rawStatus}${message ? ` — ${message}` : ""}` : message || "Steadfast update";
+-  const detail = [statusDetail, codDetail].filter(Boolean).join(" · ");
++  const chargeDetail = charge !== null && prev.courier.forwardCost !== charge
++    ? `Courier charge ৳${charge.toLocaleString()}`
++    : estimatedCharge !== null ? `Courier charge ৳${estimatedCharge.toLocaleString()} (default, awaiting Steadfast's figure)` : "";
++  const detail = [statusDetail, chargeDetail, codDetail].filter(Boolean).join(" · ");
+ 
+   // Steadfast retries webhooks; skip the write when nothing actually changed.
+   const last = order.activity[order.activity.length - 1];
+-  const sameStatusDetail = last?.detail === detail || (!codChanged && last?.detail?.startsWith(`${statusDetail} · Customer Paid changed `));
++  const sameStatusDetail = last?.detail === detail || (!codChanged && !!last?.detail && (last.detail === statusDetail || last.detail.startsWith(`${statusDetail} · `)));
+   const nothingNew =
+     prev.status === order.status &&
+     JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
+diff --git a/src/server/courier/steadfast-status.test.ts b/src/server/courier/steadfast-status.test.ts
+index f51c582..741de73 100644
+--- a/src/server/courier/steadfast-status.test.ts
++++ b/src/server/courier/steadfast-status.test.ts
+@@ -3,7 +3,7 @@
+ // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
+ import { test } from "node:test";
+ import assert from "node:assert/strict";
+-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
++import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
+ 
+ test("status strings are normalised regardless of case, spaces or hyphens", () => {
+   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
+@@ -96,3 +96,12 @@ test("tracking history selects the newest rider-note entry for manual partial-de
+   assert.equal(readLatestRiderTrackingMessage(history), latest);
+   assert.equal(readCourierPaidAmount({ tracking_message: readLatestRiderTrackingMessage(history) }), 100);
+ });
++
++test("a delivery charge of 0 or a missing one is 'not reported' so it never wipes a known charge", () => {
++  assert.equal(readDeliveryCharge({ delivery_charge: 0 }), null);
++  assert.equal(readDeliveryCharge({ delivery_charge: "" }), null);
++  assert.equal(readDeliveryCharge({}), null);
++  assert.equal(readDeliveryCharge(null), null);
++  assert.equal(readDeliveryCharge({ delivery_charge: "100.00" }), 100);
++  assert.equal(readDeliveryCharge({ delivery_fee: 80 }), 80);
++});
+diff --git a/src/server/courier/steadfast-status.ts b/src/server/courier/steadfast-status.ts
+index 2d78fc8..f1edb3a 100644
+--- a/src/server/courier/steadfast-status.ts
++++ b/src/server/courier/steadfast-status.ts
+@@ -162,3 +162,17 @@ export function readCourierPaidAmount(event: Record<string, unknown> | null | un
+   if (changedCod !== null) return changedCod;
+   return readPaidAmount(consignment) ?? readPaidAmount(event);
+ }
++
++/**
++ * The courier's delivery charge. Steadfast names it `delivery_charge` on webhooks (one SDK documents
++ * `delivery_fee`). Zero or missing means "not reported yet" — Steadfast sends 0 on the early statuses
++ * and sometimes on a partial delivery — so it returns `null` and must never overwrite a known charge.
++ */
++export function readDeliveryCharge(source: Record<string, unknown> | null | undefined): number | null {
++  if (!source) return null;
++  for (const key of ["delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee", "charge"]) {
++    const value = toAmount(source[key]);
++    if (value !== null && value > 0) return value;
++  }
++  return null;
++}
+diff --git a/src/server/courier/steadfast.ts b/src/server/courier/steadfast.ts
+index f5151d9..34c46c7 100644
+--- a/src/server/courier/steadfast.ts
++++ b/src/server/courier/steadfast.ts
+@@ -1,6 +1,6 @@
+ import "server-only";
+ import { query } from "../db";
+-import { readCourierPaidAmount, readLatestRiderTrackingMessage } from "./steadfast-status";
++import { readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage } from "./steadfast-status";
+ 
+ /**
+  * Steadfast courier API. Steadfast now serves their API from their "Packzy" merchant platform:
+@@ -161,6 +161,7 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
+   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+ 
+   const cod = readCourierPaidAmount(raw, consignmentObj);
++  const charge = readDeliveryCharge(consignmentObj) ?? readDeliveryCharge(raw);
+ 
+   return {
+     ok: true,
+@@ -172,7 +173,9 @@ export async function getSteadfastConsignment(consignmentId: number | string): P
+       // Status lookup responses commonly use { status: 200, delivery_status: "pending" }.
+       // Prefer the courier status field so the HTTP code is never mistaken for parcel status.
+       status: reportedStatus(raw, consignmentObj),
+-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
++      // status_by_cid / status_by_invoice never include a charge; leave it out (not 0) so nothing downstream
++      // mistakes "not reported" for "free delivery".
++      ...(charge !== null ? { delivery_charge: charge } : {}),
+       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
+     },
+   };
+@@ -192,6 +195,7 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
+   const raw = res.data as Record<string, unknown>;
+   const consignmentObj = ((raw.consignment as Record<string, unknown>) || raw) as Record<string, unknown>;
+   const cod = readCourierPaidAmount(raw, consignmentObj);
++  const charge = readDeliveryCharge(consignmentObj) ?? readDeliveryCharge(raw);
+   return {
+     ok: true,
+     data: {
+@@ -199,7 +203,9 @@ export async function getSteadfastConsignmentByInvoice(invoice: string): Promise
+       ...raw,
+       // Do not turn a COD value into a `collected_amount`; rider-note collection can override COD.
+       status: reportedStatus(raw, consignmentObj),
+-      delivery_charge: Number(consignmentObj.delivery_charge ?? raw.delivery_charge ?? 0),
++      // status_by_cid / status_by_invoice never include a charge; leave it out (not 0) so nothing downstream
++      // mistakes "not reported" for "free delivery".
++      ...(charge !== null ? { delivery_charge: charge } : {}),
+       ...(cod !== null ? { cod_amount: cod, codAmount: cod } : {}),
+     },
+   };
