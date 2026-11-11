@@ -74,6 +74,17 @@ export async function loadOrderForConsignment(
   return null;
 }
 
+/** The courier's default forward cost from Settings → Courier & Settlement (null when unset or zero). */
+async function defaultSteadfastForwardCost(client: PoolClient, company: string | undefined): Promise<number | null> {
+  const { rows } = await client.query<{ couriers: { id?: string; name?: string; defaultForwardCost?: number }[] | null }>(
+    "select data->'courier'->'couriers' as couriers from app_documents where key = 'settings' limit 1"
+  );
+  const name = (company ?? "").trim().toLowerCase();
+  const hit = (rows[0]?.couriers ?? []).find((c) => c.id === "cr-steadfast" || (c.name ?? "").trim().toLowerCase() === (name || "steadfast"));
+  const cost = Number(hit?.defaultForwardCost);
+  return Number.isFinite(cost) && cost > 0 ? cost : null;
+}
+
 const LABELS: Record<string, string> = {
   in_transit: "Marked In Transit (Steadfast)",
   delivered: "Marked Delivered (Steadfast)",
@@ -111,7 +122,19 @@ export async function applyStatusToOrder(
   // `cod_amount` is what the customer actually paid. Steadfast revises it for a partial delivery
   // (the customer kept some items / paid less) and pushes another webhook — which may repeat the
   // same already-final status, or carry no status at all.
-  const cod = readCourierPaidAmount(event, consignment);
+  const reportedCod = readCourierPaidAmount(event, consignment);
+  // Steadfast's own partial_delivered push repeats the ORIGINAL full cod_amount (your logs: ORD-11093 → 2490) and
+  // only later revises it to what the customer really paid. A full-COD figure with no rider note or collected
+  // amount is therefore a placeholder, not money received — don't record it as Customer Paid.
+  const withoutCod = (src: Record<string, unknown> | null | undefined) =>
+    src ? { ...src, cod_amount: undefined, codAmount: undefined, amount: undefined } : src;
+  const codIsPlaceholder =
+    mapped === "partial_delivered" &&
+    !values &&
+    reportedCod !== null &&
+    Math.abs(reportedCod - expectedCod(order)) < 0.5 &&
+    readCourierPaidAmount(withoutCod(event) as Record<string, unknown>, withoutCod(consignment)) === null;
+  const cod = codIsPlaceholder ? null : reportedCod;
   const message = typeof field("tracking_message") === "string" ? String(field("tracking_message")).trim() : "";
   const rawHappenedAt = field("updated_at");
   const happenedAt = typeof rawHappenedAt === "string" && rawHappenedAt.trim() ? rawHappenedAt.trim() : now;
@@ -134,6 +157,15 @@ export async function applyStatusToOrder(
 
   if (mapped === "in_transit" && !order.courier.dispatchDate) {
     order.courier = { ...order.courier, dispatchDate: happenedAt.slice(0, 10) };
+  }
+
+  // Processing → In Transit: Steadfast's status lookup never returns a charge, so when the event didn't
+  // carry one, book the courier's configured default forward cost now (a later webhook with the real
+  // charge replaces it).
+  let estimatedCharge: number | null = null;
+  if (mapped === "in_transit" && charge === null && !(order.courier.forwardCost > 0)) {
+    estimatedCharge = await defaultSteadfastForwardCost(client, order.courier.company);
+    if (estimatedCharge !== null) order.courier = { ...order.courier, forwardCost: estimatedCharge };
   }
 
   // Never walk a finished order backwards (e.g. a late "pending" event after delivery).
@@ -177,11 +209,14 @@ export async function applyStatusToOrder(
   const label = mapped ? LABELS[mapped] : LABELS.none;
   const codDetail = codChanged ? `Customer Paid changed ৳${(prev.delivery.customerPaid || expectedCod(prev)).toLocaleString()} → ৳${cod.toLocaleString()}` : "";
   const statusDetail = rawStatus ? `Steadfast status: ${rawStatus}${message ? ` — ${message}` : ""}` : message || "Steadfast update";
-  const detail = [statusDetail, codDetail].filter(Boolean).join(" · ");
+  const chargeDetail = charge !== null && prev.courier.forwardCost !== charge
+    ? `Courier charge ৳${charge.toLocaleString()}`
+    : estimatedCharge !== null ? `Courier charge ৳${estimatedCharge.toLocaleString()} (default, awaiting Steadfast's figure)` : "";
+  const detail = [statusDetail, chargeDetail, codDetail].filter(Boolean).join(" · ");
 
   // Steadfast retries webhooks; skip the write when nothing actually changed.
   const last = order.activity[order.activity.length - 1];
-  const sameStatusDetail = last?.detail === detail || (!codChanged && last?.detail?.startsWith(`${statusDetail} · Customer Paid changed `));
+  const sameStatusDetail = last?.detail === detail || (!codChanged && !!last?.detail && (last.detail === statusDetail || last.detail.startsWith(`${statusDetail} · `)));
   const nothingNew =
     prev.status === order.status &&
     JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
@@ -201,6 +236,27 @@ export async function applyStatusToOrder(
       where collection = 'orders' and id = $1`,
     [order.id, JSON.stringify(order), updatedBy]
   );
+  // A Delivered exchange parcel takes the product value over from the original order (which keeps only its delivery charge).
+  if (prev.status !== "delivered" && order.status === "delivered" && order.exchange) {
+    const { rows: originalRows } = await client.query<{ data: Order }>(
+      `select data from app_records where collection = 'orders' and id = $1 for update`,
+      [order.exchange.originalOrderId]
+    );
+    const original = originalRows[0]?.data;
+    if (original && original.exchangeMoved !== order.exchange.credit) {
+      original.exchangeMoved = order.exchange.credit;
+      original.activity = [
+        ...original.activity,
+        { id: crypto.randomUUID(), at: now, label: "Product value moved to exchange order", detail: `${order.orderNumber} delivered · ৳${order.exchange.credit.toLocaleString()}`, by: "Steadfast" },
+      ];
+      original.updatedAt = now;
+      await client.query(
+        `update app_records set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = $3
+          where collection = 'orders' and id = $1`,
+        [order.exchange.originalOrderId, JSON.stringify(original), updatedBy]
+      );
+    }
+  }
   await bumpRev(client, "orders");
 
   await postAccountingChanges(client, { orders: new Map([[order.id, { before: prev, after: order }]]) }, updatedBy);
@@ -279,4 +335,33 @@ export async function applyStatusToOrder(
     queuedEvents,
     whatsapp: prev.status !== order.status ? { prev, next: JSON.parse(JSON.stringify(order)) } : undefined,
   };
+}
+
+/**
+ * Steadfast `cancel_request` (a cancellation was raised or decided for a parcel). Its `verify_status` codes
+ * aren't documented, so this does NOT change the order status — it only writes the request to the order's
+ * activity log so it's visible on the order. Repeats of the same request/verify_status are skipped.
+ */
+export async function recordSteadfastCancelRequest(
+  client: PoolClient,
+  row: Row,
+  event: Record<string, unknown>
+): Promise<boolean> {
+  const order: Order = row.data;
+  const requestId = String(event.cancel_request_id ?? "").trim();
+  const verify = String(event.verify_status ?? "").trim();
+  const note = String(event.note ?? "").replace(/^"+|"+$/g, "").trim();
+  const detail =
+    `Cancellation request${requestId ? ` #${requestId}` : ""} · verify_status ${verify || "—"}` + (note ? ` · ${note}` : "");
+  if (order.activity.some((a) => a.label === "Steadfast cancellation request" && a.detail === detail)) return false;
+  const now = new Date().toISOString();
+  order.activity = [...order.activity, { id: crypto.randomUUID(), at: now, label: "Steadfast cancellation request", detail, by: "Steadfast" }];
+  order.updatedAt = now;
+  await client.query(
+    `update app_records set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = 'steadfast_webhook'
+      where collection = 'orders' and id = $1`,
+    [order.id, JSON.stringify(order)]
+  );
+  await bumpRev(client, "orders");
+  return true;
 }

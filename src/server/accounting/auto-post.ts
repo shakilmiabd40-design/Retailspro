@@ -6,7 +6,7 @@ import type { Order, OrderExchange, OrderItem } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
 import type { PurchaseOrder } from "@/lib/purchase-orders/types";
 import type { PosInvoice, PosReturn } from "@/lib/pos/types";
-import { actualCourierCost, grossRevenue } from "@/lib/orders/utils";
+import { actualCourierCost, expectedCod, grossRevenue } from "@/lib/orders/utils";
 import { allocateLandedCost, consumeFifo } from "@/lib/accounting/fifo";
 import { bumpRev } from "@/server/seed";
 
@@ -208,16 +208,18 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
     }
     if (isInitialOutcome) {
       const billed = order.status === "partial_delivered" ? order.delivery.customerPaid : grossRevenue(order);
-      const collected = order.status === "partial_delivered" ? billed : (order.delivery.customerPaid || billed);
+      // An exchange order's COD is lower than its billed amount (the returned goods are credited), and may be ৳0.
+      const collected = order.status === "partial_delivered" ? billed : (order.delivery.customerPaid || (order.exchange ? expectedCod(order) : billed));
       const lines: JournalEntryInputLine[] = [{ code: "1100", debit: collected, credit: 0 }];
       if (order.status === "delivered") {
         const itemTotal = [...revenueByCode.values()].reduce((sum, amount) => sum + amount, 0);
         const deliveryBilled = Math.max(0, billed - itemTotal);
         const revenueTotal = itemTotal + deliveryBilled;
-        const scale = revenueTotal > 0 ? collected / revenueTotal : 0;
-        for (const [code, amount] of revenueByCode) lines.push({ code, debit: 0, credit: round2(amount * scale) });
-        if (deliveryBilled) lines.push({ code: "4010", debit: 0, credit: round2(deliveryBilled * scale) });
-        if (collected < revenueTotal) lines.push({ code: "4040", debit: round2(revenueTotal - collected), credit: 0 });
+        // Revenue is always credited in full; any gap to the cash collected is balanced by one adjustment line
+        // (scaling the revenue as well as adding the gap made this journal unbalanced whenever collected ≠ billed).
+        for (const [code, amount] of revenueByCode) lines.push({ code, debit: 0, credit: round2(amount) });
+        if (deliveryBilled) lines.push({ code: "4010", debit: 0, credit: round2(deliveryBilled) });
+        if (collected < revenueTotal) lines.push({ code: "4040", debit: round2(revenueTotal - collected), credit: 0, memo: order.exchange ? `Exchange credit · returned goods from ${order.exchange.originalOrderNumber}` : undefined });
         else if (collected > revenueTotal) lines.push({ code: "4010", debit: 0, credit: round2(collected - revenueTotal) });
       } else lines.push({ code: "4010", debit: 0, credit: collected });
       lines.push(...saleLines);

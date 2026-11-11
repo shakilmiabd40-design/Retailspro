@@ -633,6 +633,11 @@ function OrdersPageInner() {
                     <Link href={`/orders/${o.id}`} className="text-[13px] font-medium hover:underline" style={{ color: "var(--text)" }}>
                       #{o.orderNumber}
                     </Link>
+                    {o.exchange && (
+                      <p className="text-[11px] font-medium" style={{ color: "var(--brand-strong)" }}>
+                        Exchange · #{o.exchange.originalOrderNumber}
+                      </p>
+                    )}
                   </td>
                   <td className="px-3 py-3">
                     <p className="text-[13px]" style={{ color: "var(--text)" }}>

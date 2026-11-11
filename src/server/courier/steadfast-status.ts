@@ -87,7 +87,7 @@ export function readDeliveryCharge(
     : null;
   for (const source of [values, consignment, event]) {
     if (!source) continue;
-    for (const key of ["delivery_charge", "deliveryCharge", "charge"]) {
+    for (const key of ["delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee", "charge"]) {
       const amount = toAmount(source[key]);
       if (amount !== null && amount > 0) return amount;
     }
@@ -107,6 +107,9 @@ export function readPaidAmount(source: Record<string, unknown> | null | undefine
   const codKeys = [
     "cod_amount",
     "codAmount",
+    "cod",
+    "cod_amt",
+    "new_cod_amount",
     "amount",
   ];
   for (const key of collectedKeys) {

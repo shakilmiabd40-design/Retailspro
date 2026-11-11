@@ -57,9 +57,19 @@ export function totalDiscount(order: Order): number {
   return order.items.reduce((sum, i) => sum + i.discount, 0);
 }
 
-/** Expected COD = Product Subtotal - Discount + Customer Delivery Charge */
+/** True for an order raised to exchange goods from an already-delivered order. */
+export function isExchangeOrder(order: Pick<Order, "exchange">): boolean {
+  return !!order.exchange;
+}
+
+/**
+ * Expected COD = Product Subtotal - Discount + Customer Delivery Charge.
+ * An exchange order also subtracts the credit for the goods coming back (never below ৳0): the customer
+ * already paid for those on the original order, so they only pay the difference plus the delivery charge.
+ */
 export function expectedCod(order: Order): number {
-  return productSubtotal(order) - totalDiscount(order) + order.deliveryCharge;
+  const cod = productSubtotal(order) - totalDiscount(order) + order.deliveryCharge;
+  return order.exchange ? Math.max(0, cod - order.exchange.credit) : cod;
 }
 
 /**
@@ -106,7 +116,8 @@ export function totalItemQty(order: Order): number {
  */
 export function productSales(order: Order): number {
   if (order.status !== "delivered") return 0;
-  return productSubtotal(order) - totalDiscount(order);
+  // After an exchange parcel is Delivered the original keeps only its delivery charge: the product value moved to it.
+  return Math.max(0, productSubtotal(order) - totalDiscount(order) - (order.exchangeMoved ?? 0));
 }
 
 /**
@@ -147,15 +158,18 @@ export function courierCostForSummary(order: Order): number {
   return actualCourierCost(order);
 }
 
-/** Courier Profit — only meaningful (and only positive) for Partial Delivered. */
+/** Courier Profit — Partial Delivered, and a Delivered exchange parcel (COD collected above the courier charge). */
 export function courierProfit(order: Order): number {
+  // A delivered exchange parcel works like a partial delivery: COD collected minus the courier charge.
+  if (order.status === "delivered" && order.exchange) return Math.max(0, collectedAmount(order) - actualCourierCost(order));
   if (order.status !== "partial_delivered") return 0;
   return Math.max(0, courierNet(order));
 }
 
-/** Courier Loss — Partial Delivered (if net negative) or full cost for Refuse Return. */
+/** Courier Loss — Partial Delivered or Delivered exchange (if COD < courier charge), or full cost for Refuse Return. */
 export function courierLoss(order: Order): number {
   if (order.status === "refuse_return") return actualCourierCost(order);
+  if (order.status === "delivered" && order.exchange) return Math.max(0, actualCourierCost(order) - collectedAmount(order));
   if (order.status === "partial_delivered") return Math.max(0, -courierNet(order));
   return 0;
 }

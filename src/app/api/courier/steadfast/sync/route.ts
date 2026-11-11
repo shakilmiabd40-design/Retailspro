@@ -68,6 +68,10 @@ export const POST = route(async (req) => {
   });
   if (!result) throw new ApiError(404, "not_found", "The order disappeared while syncing.");
 
+  console.log(
+    `[steadfast][sync] ${orderNumber || trackingId}: steadfast=${String(remote.data.status ?? "—")} charge=${String(remote.data.delivery_charge ?? "—")} note=${String(statusPayload.tracking_message ?? "—").slice(0, 160)} → order=${result.orderStatus} paid=${result.customerPaid ?? "—"} ${result.changed ? "updated" : "no change"}`
+  );
+
   if (result.queuedEvents > 0) {
     after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
   }

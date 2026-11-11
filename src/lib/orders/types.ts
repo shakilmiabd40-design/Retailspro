@@ -117,6 +117,19 @@ export interface Order {
   /** The other system's own order id — unique per channel, used to make retries safe. */
   externalId?: string;
 
+  /**
+   * Set on an exchange order: the delivered order it replaces. `credit` is the value of the goods coming
+   * back (already paid on the original order), so the customer's COD is items − credit + delivery charge.
+   */
+  exchange?: { originalOrderId: string; originalOrderNumber: string; credit: number };
+  /** Set on the delivered order once exchange order(s) have been raised against it. */
+  exchangedTo?: { orderId: string; orderNumber: string }[];
+  /**
+   * Product value that moved to a delivered exchange order. Written once that exchange parcel is Delivered;
+   * until then the original order keeps its full amounts. The original order then keeps only its delivery charge.
+   */
+  exchangeMoved?: number;
+
   courier: CourierInfo;
   delivery: DeliveryResult;
   returnInfo: ReturnInfo;

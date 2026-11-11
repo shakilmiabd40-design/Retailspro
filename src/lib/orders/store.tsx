@@ -44,6 +44,8 @@ export type NewOrderInput = {
    */
   freeDeliveryCourierCost?: number;
   pos?: { invoiceId: string; invoiceNumber: string };
+  /** Exchange for a delivered order: its id, and the value of the goods coming back (credited against the COD). */
+  exchange?: { originalOrderId: string; credit: number };
 };
 
 export type DispatchInput = {
@@ -206,6 +208,17 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     if (!(freeDeliveryCourierCost >= 0)) return { ok: false, error: "Courier charge can't be negative." };
     if (orderDiscount > lineNet) return { ok: false, error: "Order discount can't be more than the order total." };
 
+    let exchangeInfo: Order["exchange"];
+    if (input.exchange) {
+      const original = orders.find((o) => o.id === input.exchange!.originalOrderId);
+      if (!original) return { ok: false, error: "The delivered order for this exchange could not be found." };
+      if (original.status !== "delivered") return { ok: false, error: "Only a Delivered order can be exchanged." };
+      if (original.exchange) return { ok: false, error: "An exchange order can't itself be exchanged — use the original delivered order." };
+      const credit = Number(input.exchange.credit);
+      if (!Number.isFinite(credit) || credit < 0) return { ok: false, error: "Exchange credit can't be negative." };
+      exchangeInfo = { originalOrderId: original.id, originalOrderNumber: original.orderNumber, credit };
+    }
+
     // Availability check against live product stock (stock - reserved).
     for (const line of input.items) {
       const product = products.find((p) => p.id === line.productId);
@@ -239,6 +252,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       notes: input.notes,
       items: foldOrderDiscount(input.items, orderDiscount).map((i) => ({ ...i, id: crypto.randomUUID() })),
       deliveryCharge: input.deliveryCharge,
+      ...(exchangeInfo ? { exchange: exchangeInfo } : {}),
       ...(input.pos ? { source: "pos" as const, posInvoiceId: input.pos.invoiceId, posInvoiceNumber: input.pos.invoiceNumber } : {}),
       courier: { company: "", trackingId: "", forwardCost: freeDeliveryCourierCost, returnCost: 0, otherCost: 0 },
       delivery: { customerPaid: 0 },
@@ -249,6 +263,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
           "Order Created",
           [
             input.pos ? `From POS invoice ${input.pos.invoiceNumber}` : null,
+            exchangeInfo ? `Exchange for delivered order ${exchangeInfo.originalOrderNumber} · credit ৳${exchangeInfo.credit.toLocaleString()}` : null,
             orderDiscount > 0 ? `Order discount ৳${orderDiscount.toLocaleString()} applied` : null,
             freeDeliveryCourierCost > 0 ? `Free delivery — courier charge ৳${freeDeliveryCourierCost.toLocaleString()} counted as a loss` : null,
           ]
@@ -288,7 +303,19 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     } catch {}
 
     reserveStock(itemsAsLineItems(order.items));
-    setOrders((prev) => [order, ...prev]);
+    setOrders((prev) => [
+      order,
+      ...prev.map((o) =>
+        exchangeInfo && o.id === exchangeInfo.originalOrderId
+          ? {
+              ...o,
+              exchangedTo: [...(o.exchangedTo ?? []), { orderId: order.id, orderNumber }],
+              activity: [...o.activity, activity("Exchange order created", `${orderNumber} · credit ৳${exchangeInfo.credit.toLocaleString()}`)],
+              updatedAt: now,
+            }
+          : o
+      ),
+    ]);
     return { ok: true, order };
   }
 
@@ -359,6 +386,17 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
         qty: i.qty,
       })),
     });
+    // A Delivered exchange parcel takes the product value over from the original order, which then keeps only its delivery charge.
+    if (order.exchange) {
+      const { originalOrderId, credit } = order.exchange;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === originalOrderId
+            ? { ...o, exchangeMoved: credit, activity: [...o.activity, activity("Product value moved to exchange order", `${order.orderNumber} delivered · ৳${credit.toLocaleString()}`)], updatedAt: new Date().toISOString() }
+            : o
+        )
+      );
+    }
     updateOrder(id, (o) => ({
       ...o,
       status: "delivered",

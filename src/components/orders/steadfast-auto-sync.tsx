@@ -44,8 +44,9 @@ export function SteadfastAutoSync() {
         inFlight.current.add(order.id);
         try {
           const result = await api<{ status: string; changed: boolean; orderStatus: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
-          if (active && result.orderStatus === "in_transit" && result.changed) {
-            toast(`Order #${order.orderNumber} moved to In Transit (Steadfast: ${result.status})`, "success");
+          if (active && result.changed) {
+            const label = result.orderStatus.replace(/_/g, " ");
+            toast(`Order #${order.orderNumber} moved to ${label} (Steadfast: ${result.status})`, "success");
           }
         } catch {
           // Transient failures are retried on the next poll; manual sync remains available on the order.

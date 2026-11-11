@@ -3,7 +3,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { tx } from "@/server/db";
 import { deliverDue } from "@/server/publicapi/webhooks";
 import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
-import { applyStatusToOrder, loadOrderForConsignment } from "@/server/courier/apply-steadfast-status";
+import { applyStatusToOrder, loadOrderForConsignment, recordSteadfastCancelRequest } from "@/server/courier/apply-steadfast-status";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +102,9 @@ export async function POST(req: NextRequest) {
   // user_update              — Steadfast account/user setting changed
   const LIFECYCLE_TYPES = [
     "return_list",
+    "return_list_accepted", // documented: you confirmed receipt of a return list (carries the consignments in it)
+    "return_status", // seen in production logs, not in Steadfast's webhook docs — payload logged only
+    "payment_request", // documented: a payout was requested
     "accepted_payment_request",
     "cancel_request",
     "return_request",
@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
   const isLifecycleEvent = (LIFECYCLE_TYPES as readonly string[]).includes(type);
 
   if (!isStatusEvent && !isLifecycleEvent) {
-    console.log(`[steadfast] ignoring unknown notification_type=${type}`);
+    console.log(`[steadfast] ignoring unknown notification_type=${type} | payload=${rawBody.slice(0, 500)}`);
     return NextResponse.json({ status: "received" });
   }
 
@@ -132,6 +135,17 @@ export async function POST(req: NextRequest) {
         (invoice ? ` invoice=${invoice}` : "") +
         ` | ${JSON.stringify(event).slice(0, 400)}`
     );
+    if (type === "cancel_request" && (invoice || consignmentId)) {
+      try {
+        await tx(async (client) => {
+          const row = await loadOrderForConsignment(client, { invoice, consignmentId });
+          if (row) await recordSteadfastCancelRequest(client, row, event);
+        });
+      } catch (err) {
+        console.error("[steadfast] couldn't record cancel_request:", err);
+        return new NextResponse("Internal Server Error", { status: 500 });
+      }
+    }
     return NextResponse.json({ status: "received" });
   }
 
@@ -166,7 +180,7 @@ export async function POST(req: NextRequest) {
 
     if (!result) {
       // Probably an order created outside RetailsPro — acknowledge so Steadfast stops retrying.
-      console.warn(`[steadfast] no order matched invoice=${invoice || "—"} consignment=${consignmentId || "—"}`);
+      console.warn(`[steadfast] NO ORDER MATCHED invoice=${invoice || "—"} consignment=${consignmentId || "—"} | payload=${rawBody.slice(0, 600)}`);
       return NextResponse.json({ status: "received" });
     }
 
@@ -179,7 +193,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(
-      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? values?.status ?? "—")} cod=${String(result.reportedCodAmount ?? "—")} → ${result.changed ? "updated" : "no change"}` +
+      `[steadfast] ${invoice || consignmentId}: type=${type} status=${String(event.status ?? values?.status ?? "—")} charge=${String(event.delivery_charge ?? values?.delivery_charge ?? "—")} cod=${String(result.reportedCodAmount ?? "—")} order=${result.orderStatus} → ${result.changed ? "updated" : "no change"} | payload=${rawBody.slice(0, 500)}` +
         (result.queuedEvents ? `, ${result.queuedEvents} webhook event(s) queued` : "")
     );
   } catch (err) {

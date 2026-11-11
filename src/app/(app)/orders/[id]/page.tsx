@@ -84,7 +84,12 @@ export default function OrderDetailsPage() {
     try {
       const result = await api<{ changed: boolean; customerPaid?: number; reportedCodAmount: number | null; status?: string }>("POST", "/api/courier/steadfast/sync", { orderId: order.id });
       if (result.reportedCodAmount === null) {
-        showToast("Steadfast did not return a COD amount; Customer Paid was not checked.", "error");
+        // Steadfast's status lookup has no COD field, so there is nothing to compare — the webhook (or a rider note) is
+        // what updates Customer Paid. Say that, and show what's recorded, instead of reporting a failure.
+        showToast(
+          `Steadfast's status lookup doesn't include COD, so it can't be re-checked here. Customer Paid stays at ${formatTaka(order.delivery.customerPaid, 2)} and updates automatically when Steadfast sends a COD change.`,
+          "success"
+        );
       } else if (result.changed) {
         showToast(`Steadfast COD synced: ${formatTaka(result.customerPaid ?? result.reportedCodAmount, 2)}`, "success");
       } else {
@@ -129,6 +134,25 @@ export default function OrderDetailsPage() {
           <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
             Created {formatOrderDate(order.createdAt)}
           </p>
+          {order.exchange && (
+            <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+              Exchange for delivered order{" "}
+              <Link href={`/orders/${order.exchange.originalOrderId}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{order.exchange.originalOrderNumber}</Link>
+              {" "}· credit {formatTaka(order.exchange.credit, 2)}
+            </p>
+          )}
+          {!!order.exchangedTo?.length && (
+            <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+              Exchanged with{" "}
+              {order.exchangedTo.map((x, i) => (
+                <span key={x.orderId}>
+                  {i > 0 && ", "}
+                  <Link href={`/orders/${x.orderId}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{x.orderNumber}</Link>
+                </span>
+              ))}
+              {order.exchangeMoved ? ` · ${formatTaka(order.exchangeMoved, 2)} product value moved to the exchange order (this order keeps its delivery charge)` : ""}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {!isFinalStatus(order.status) && (
@@ -155,6 +179,16 @@ export default function OrderDetailsPage() {
             <button onClick={() => setExchangeOpen((open) => !open)} className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
               <RefreshCcw size={14} /> Exchange Items
             </button>
+          )}
+          {order.status === "delivered" && !order.exchange && (
+            <Link
+              href={`/orders/new?exchangeOf=${order.id}`}
+              className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"
+              style={{ borderColor: "var(--border)", color: "var(--text)" }}
+            >
+              <RefreshCcw size={14} />
+              Create Exchange Order
+            </Link>
           )}
           <Link
             href={`/orders/${order.id}/edit`}
@@ -390,9 +424,9 @@ export default function OrderDetailsPage() {
               )}
               <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
                 <Info label="Delivery Status" value={ORDER_STATUS_LABELS[order.status]} />
-                <Info label="Customer Paid" value={formatTaka(order.delivery.customerPaid, 2)} />
+                <Info label="Customer Paid" value={formatTaka(order.exchange ? collectedAmount(order) : order.delivery.customerPaid, 2)} />
                 <Info label="Courier Cost" value={formatTaka(cost, 2)} />
-                <Info label="Courier Recovery" value={formatTaka(order.delivery.customerPaid, 2)} />
+                <Info label="Courier Recovery" value={formatTaka(order.exchange ? collectedAmount(order) : order.delivery.customerPaid, 2)} />
                 {profit > 0 && <Info label="Courier Profit" value={formatTaka(profit, 2)} accent="var(--green)" />}
                 {loss > 0 && <Info label="Courier Loss" value={formatTaka(loss, 2)} accent="var(--red)" />}
                 {order.delivery.settlementStatus && <Info label="Settlement Status" value={order.delivery.settlementStatus === "settled" ? "Settled" : "Pending"} />}

@@ -86,6 +86,13 @@ export function validateOrder(data: unknown): void {
       }
     });
   }
+  if (o.exchange !== undefined) {
+    // An exchange order (a replacement parcel raised against a delivered order): where it came from + the credit for the returned goods.
+    if (!isObj(o.exchange) || typeof o.exchange.originalOrderId !== "string" || !o.exchange.originalOrderId || typeof o.exchange.originalOrderNumber !== "string") {
+      invalid("exchange", "exchange must reference the delivered order it replaces.");
+    }
+    nonNegative(o.exchange.credit, "exchange.credit");
+  }
   if (o.exchanges !== undefined) {
     if (!Array.isArray(o.exchanges)) invalid("exchanges", "exchanges must be an array.");
     if (o.exchanges.length && o.status !== "delivered") invalid("exchanges", "Only delivered orders can have exchanges.");

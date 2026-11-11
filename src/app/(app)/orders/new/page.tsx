@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Search, Trash2, Package } from "lucide-react";
@@ -11,7 +11,8 @@ import { useToast } from "@/components/toast";
 import { availableStock, formatTaka } from "@/lib/products/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { parseContactDetails } from "@/lib/orders/contact-details";
-import type { OrderItem } from "@/lib/orders/types";
+import { productSubtotal, totalDiscount } from "@/lib/orders/utils";
+import type { Order, OrderItem } from "@/lib/orders/types";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
@@ -30,7 +31,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 export default function CreateOrderPage() {
   const { products } = useProducts();
-  const { createOrder } = useOrders();
+  const { createOrder, orders } = useOrders();
   const { settings } = useSettings();
   const showToast = useToast();
   const router = useRouter();
@@ -47,6 +48,38 @@ export default function CreateOrderPage() {
   // Whenever the customer is charged ৳0 for delivery, the courier still bills the shop for it — this
   // records that real charge as a loss instead of silently assuming it was ৳0 too.
   const [courierEstimate, setCourierEstimate] = useState(0);
+
+  // Exchange: raised against an already-delivered order. Credit = value of the goods coming back.
+  const [exchangeOriginal, setExchangeOriginal] = useState<Order | null>(null);
+  const [exchangeQuery, setExchangeQuery] = useState("");
+  const [exchangeCredit, setExchangeCredit] = useState(0);
+  const exchangeResults = useMemo(() => {
+    const q = exchangeQuery.trim().toLowerCase();
+    if (!q) return [];
+    return orders
+      .filter((o) => o.status === "delivered" && !o.exchange && (o.orderNumber.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q) || o.phone.includes(q)))
+      .slice(0, 6);
+  }, [exchangeQuery, orders]);
+
+  function chooseExchangeOrder(o: Order) {
+    setExchangeOriginal(o);
+    setExchangeQuery("");
+    setExchangeCredit(Math.max(0, productSubtotal(o) - totalDiscount(o)));
+    setCustomerName((v) => v || o.customerName);
+    setPhone((v) => v || o.phone);
+    setAltPhone((v) => v || o.altPhone || "");
+    setAddress((v) => v || o.address);
+    setNotes((v) => v || `Exchange for order ${o.orderNumber}`);
+  }
+
+  // Opened from a delivered order's "Create Exchange" button (?exchangeOf=<order id>).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("exchangeOf");
+    if (!id || exchangeOriginal) return;
+    const o = orders.find((x) => x.id === id);
+    if (o && o.status === "delivered" && !o.exchange) chooseExchangeOrder(o);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders]);
 
   const [productQuery, setProductQuery] = useState("");
   const [pickerProductId, setPickerProductId] = useState<string | null>(null);
@@ -110,7 +143,9 @@ export default function CreateOrderPage() {
 
   const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
   const itemDiscountTotal = items.reduce((s, i) => s + i.discount, 0);
-  const expectedCod = subtotal - itemDiscountTotal - orderDiscount + deliveryCharge;
+  const creditApplied = exchangeOriginal ? Math.max(0, exchangeCredit) : 0;
+  const rawCod = subtotal - itemDiscountTotal - orderDiscount + deliveryCharge;
+  const expectedCod = exchangeOriginal ? Math.max(0, rawCod - creditApplied) : rawCod;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -133,6 +168,7 @@ export default function CreateOrderPage() {
       deliveryCharge,
       orderDiscount,
       freeDeliveryCourierCost: deliveryCharge === 0 ? courierEstimate : undefined,
+      ...(exchangeOriginal ? { exchange: { originalOrderId: exchangeOriginal.id, credit: creditApplied } } : {}),
       items: items.map(({ id: _id, ...rest }) => rest),
     });
     if (!result.ok) {
@@ -167,6 +203,46 @@ export default function CreateOrderPage() {
           Save Order
         </button>
       </div>
+
+      {/* Exchange — optional link to a delivered order */}
+      <section className="card space-y-3 p-5">
+        <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
+          Exchange <span className="text-[12px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+        </p>
+        {exchangeOriginal ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-xl border px-3 py-2.5 text-[13px]" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+              <span style={{ color: "var(--text)" }}>
+                Exchange for delivered order <Link href={`/orders/${exchangeOriginal.id}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{exchangeOriginal.orderNumber}</Link> · {exchangeOriginal.customerName}
+              </span>
+              <button type="button" onClick={() => { setExchangeOriginal(null); setExchangeCredit(0); }} className="focus-ring rounded-lg px-2 py-1 text-[12px] font-medium" style={{ color: "var(--red)" }}>
+                Remove
+              </button>
+            </div>
+            <Field label="Credit for returned goods (৳) — already paid on the original order">
+              <input type="number" min={0} value={exchangeCredit} onChange={(e) => setExchangeCredit(Math.max(0, Number(e.target.value) || 0))} className={inputClass} style={inputStyle} />
+            </Field>
+            <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+              The customer pays: new products − credit + delivery charge. If the Steadfast COD is less than the courier charge it is counted as a courier loss; if it is more, as profit.
+            </p>
+          </div>
+        ) : (
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-faint)" }} />
+            <input value={exchangeQuery} onChange={(e) => setExchangeQuery(e.target.value)} placeholder="Search a delivered order by number, name or phone to exchange…" className={`${inputClass} pl-8`} style={inputStyle} />
+            {exchangeResults.length > 0 && (
+              <div className="mt-1 divide-y rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+                {exchangeResults.map((o) => (
+                  <button key={o.id} type="button" onClick={() => chooseExchangeOrder(o)} className="focus-ring flex w-full items-center justify-between px-3 py-2 text-left text-[13px]">
+                    <span style={{ color: "var(--text)" }}>#{o.orderNumber} · {o.customerName}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{formatTaka(productSubtotal(o) - totalDiscount(o), 2)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Section A — Customer Information */}
       <section className="card space-y-4 p-5">
@@ -470,6 +546,7 @@ export default function CreateOrderPage() {
         <SummaryRow label="Item Discounts" value={`- ${formatTaka(itemDiscountTotal, 2)}`} muted />
         <SummaryRow label="Order Discount" value={`- ${formatTaka(orderDiscount, 2)}`} muted />
         <SummaryRow label="Customer Delivery Charge" value={`+ ${formatTaka(deliveryCharge, 2)}`} muted />
+        {exchangeOriginal && <SummaryRow label={`Exchange credit (#${exchangeOriginal.orderNumber})`} value={`- ${formatTaka(creditApplied, 2)}`} muted />}
         {deliveryCharge === 0 && courierEstimate > 0 && <SummaryRow label="Free Delivery — Courier Cost (loss, not part of COD)" value={formatTaka(courierEstimate, 2)} muted />}
         <div className="mt-2 flex items-center justify-between border-t pt-2" style={{ borderColor: "var(--border)" }}>
           <span className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
