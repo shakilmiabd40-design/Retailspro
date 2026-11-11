@@ -1,5 +1,17 @@
+diff --git a/package.json b/package.json
+index 81e233e..29556b2 100644
+--- a/package.json
++++ b/package.json
+@@ -19,6 +19,7 @@
+     "test:webhooks": "npx --yes tsx --test --conditions=react-server src/server/publicapi/webhooks.test.ts",
+     "test:validate": "npx --yes tsx --test --conditions=react-server src/server/validate.test.ts",
+     "test:redact": "npx --yes tsx --test --conditions=react-server src/server/redact.test.ts",
++    "test:exchange": "npx --yes tsx --test src/lib/orders/exchange.test.ts",
+     "test:steadfast": "npx --yes tsx --test src/server/courier/steadfast-status.test.ts",
+     "test:server": "npx --yes tsx --test --conditions=react-server src/server/auth.test.ts src/server/collections.test.ts src/server/publicapi/webhooks.test.ts src/server/validate.test.ts src/server/redact.test.ts"
+   },
 diff --git a/src/app/(app)/orders/[id]/page.tsx b/src/app/(app)/orders/[id]/page.tsx
-index c98cb38..666d09d 100644
+index c98cb38..707a2c6 100644
 --- a/src/app/(app)/orders/[id]/page.tsx
 +++ b/src/app/(app)/orders/[id]/page.tsx
 @@ -79,7 +79,12 @@ export default function OrderDetailsPage() {
@@ -16,6 +28,221 @@ index c98cb38..666d09d 100644
        } else if (result.changed) {
          showToast(`Steadfast COD synced: ${formatTaka(result.customerPaid ?? result.reportedCodAmount, 2)}`, "success");
        } else {
+@@ -124,6 +129,25 @@ export default function OrderDetailsPage() {
+           <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+             Created {formatOrderDate(order.createdAt)}
+           </p>
++          {order.exchange && (
++            <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
++              Exchange for delivered order{" "}
++              <Link href={`/orders/${order.exchange.originalOrderId}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{order.exchange.originalOrderNumber}</Link>
++              {" "}· credit {formatTaka(order.exchange.credit, 2)}
++            </p>
++          )}
++          {!!order.exchangedTo?.length && (
++            <p className="mt-1 text-[12.5px]" style={{ color: "var(--text-muted)" }}>
++              Exchanged with{" "}
++              {order.exchangedTo.map((x, i) => (
++                <span key={x.orderId}>
++                  {i > 0 && ", "}
++                  <Link href={`/orders/${x.orderId}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{x.orderNumber}</Link>
++                </span>
++              ))}
++              {order.exchangeMoved ? ` · ${formatTaka(order.exchangeMoved, 2)} product value moved to the exchange order (this order keeps its delivery charge)` : ""}
++            </p>
++          )}
+         </div>
+         <div className="flex flex-wrap gap-2">
+           {!isFinalStatus(order.status) && (
+@@ -146,6 +170,16 @@ export default function OrderDetailsPage() {
+               Cancel Order
+             </button>
+           )}
++          {order.status === "delivered" && !order.exchange && (
++            <Link
++              href={`/orders/new?exchangeOf=${order.id}`}
++              className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"
++              style={{ borderColor: "var(--border)", color: "var(--text)" }}
++            >
++              <RefreshCcw size={14} />
++              Create Exchange
++            </Link>
++          )}
+           <Link
+             href={`/orders/${order.id}/edit`}
+             className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"
+@@ -350,9 +384,9 @@ export default function OrderDetailsPage() {
+               )}
+               <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
+                 <Info label="Delivery Status" value={ORDER_STATUS_LABELS[order.status]} />
+-                <Info label="Customer Paid" value={formatTaka(order.delivery.customerPaid, 2)} />
++                <Info label="Customer Paid" value={formatTaka(order.exchange ? collectedAmount(order) : order.delivery.customerPaid, 2)} />
+                 <Info label="Courier Cost" value={formatTaka(cost, 2)} />
+-                <Info label="Courier Recovery" value={formatTaka(order.delivery.customerPaid, 2)} />
++                <Info label="Courier Recovery" value={formatTaka(order.exchange ? collectedAmount(order) : order.delivery.customerPaid, 2)} />
+                 {profit > 0 && <Info label="Courier Profit" value={formatTaka(profit, 2)} accent="var(--green)" />}
+                 {loss > 0 && <Info label="Courier Loss" value={formatTaka(loss, 2)} accent="var(--red)" />}
+                 {order.delivery.settlementStatus && <Info label="Settlement Status" value={order.delivery.settlementStatus === "settled" ? "Settled" : "Pending"} />}
+diff --git a/src/app/(app)/orders/new/page.tsx b/src/app/(app)/orders/new/page.tsx
+index 8169ace..65bc6d0 100644
+--- a/src/app/(app)/orders/new/page.tsx
++++ b/src/app/(app)/orders/new/page.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useMemo, useState } from "react";
++import { useEffect, useMemo, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import Link from "next/link";
+ import { ArrowLeft, Search, Trash2, Package } from "lucide-react";
+@@ -11,7 +11,8 @@ import { useToast } from "@/components/toast";
+ import { availableStock, formatTaka } from "@/lib/products/utils";
+ import { useAutoGeo } from "@/lib/orders/use-auto-geo";
+ import { parseContactDetails } from "@/lib/orders/contact-details";
+-import type { OrderItem } from "@/lib/orders/types";
++import { productSubtotal, totalDiscount } from "@/lib/orders/utils";
++import type { Order, OrderItem } from "@/lib/orders/types";
+ 
+ const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
+ const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
+@@ -30,7 +31,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
+ 
+ export default function CreateOrderPage() {
+   const { products } = useProducts();
+-  const { createOrder } = useOrders();
++  const { createOrder, orders } = useOrders();
+   const { settings } = useSettings();
+   const showToast = useToast();
+   const router = useRouter();
+@@ -48,6 +49,38 @@ export default function CreateOrderPage() {
+   // records that real charge as a loss instead of silently assuming it was ৳0 too.
+   const [courierEstimate, setCourierEstimate] = useState(0);
+ 
++  // Exchange: raised against an already-delivered order. Credit = value of the goods coming back.
++  const [exchangeOriginal, setExchangeOriginal] = useState<Order | null>(null);
++  const [exchangeQuery, setExchangeQuery] = useState("");
++  const [exchangeCredit, setExchangeCredit] = useState(0);
++  const exchangeResults = useMemo(() => {
++    const q = exchangeQuery.trim().toLowerCase();
++    if (!q) return [];
++    return orders
++      .filter((o) => o.status === "delivered" && !o.exchange && (o.orderNumber.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q) || o.phone.includes(q)))
++      .slice(0, 6);
++  }, [exchangeQuery, orders]);
++
++  function chooseExchangeOrder(o: Order) {
++    setExchangeOriginal(o);
++    setExchangeQuery("");
++    setExchangeCredit(Math.max(0, productSubtotal(o) - totalDiscount(o)));
++    setCustomerName((v) => v || o.customerName);
++    setPhone((v) => v || o.phone);
++    setAltPhone((v) => v || o.altPhone || "");
++    setAddress((v) => v || o.address);
++    setNotes((v) => v || `Exchange for order ${o.orderNumber}`);
++  }
++
++  // Opened from a delivered order's "Create Exchange" button (?exchangeOf=<order id>).
++  useEffect(() => {
++    const id = new URLSearchParams(window.location.search).get("exchangeOf");
++    if (!id || exchangeOriginal) return;
++    const o = orders.find((x) => x.id === id);
++    if (o && o.status === "delivered" && !o.exchange) chooseExchangeOrder(o);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [orders]);
++
+   const [productQuery, setProductQuery] = useState("");
+   const [pickerProductId, setPickerProductId] = useState<string | null>(null);
+   const [qtyDraft, setQtyDraft] = useState<Record<string, number>>({});
+@@ -110,7 +143,9 @@ export default function CreateOrderPage() {
+ 
+   const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
+   const itemDiscountTotal = items.reduce((s, i) => s + i.discount, 0);
+-  const expectedCod = subtotal - itemDiscountTotal - orderDiscount + deliveryCharge;
++  const creditApplied = exchangeOriginal ? Math.max(0, exchangeCredit) : 0;
++  const rawCod = subtotal - itemDiscountTotal - orderDiscount + deliveryCharge;
++  const expectedCod = exchangeOriginal ? Math.max(0, rawCod - creditApplied) : rawCod;
+ 
+   function handleSubmit(e: React.FormEvent) {
+     e.preventDefault();
+@@ -133,6 +168,7 @@ export default function CreateOrderPage() {
+       deliveryCharge,
+       orderDiscount,
+       freeDeliveryCourierCost: deliveryCharge === 0 ? courierEstimate : undefined,
++      ...(exchangeOriginal ? { exchange: { originalOrderId: exchangeOriginal.id, credit: creditApplied } } : {}),
+       items: items.map(({ id: _id, ...rest }) => rest),
+     });
+     if (!result.ok) {
+@@ -168,6 +204,46 @@ export default function CreateOrderPage() {
+         </button>
+       </div>
+ 
++      {/* Exchange — optional link to a delivered order */}
++      <section className="card space-y-3 p-5">
++        <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
++          Exchange <span className="text-[12px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
++        </p>
++        {exchangeOriginal ? (
++          <div className="space-y-3">
++            <div className="flex items-center justify-between rounded-xl border px-3 py-2.5 text-[13px]" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
++              <span style={{ color: "var(--text)" }}>
++                Exchange for delivered order <Link href={`/orders/${exchangeOriginal.id}`} className="font-semibold hover:underline" style={{ color: "var(--brand)" }}>#{exchangeOriginal.orderNumber}</Link> · {exchangeOriginal.customerName}
++              </span>
++              <button type="button" onClick={() => { setExchangeOriginal(null); setExchangeCredit(0); }} className="focus-ring rounded-lg px-2 py-1 text-[12px] font-medium" style={{ color: "var(--red)" }}>
++                Remove
++              </button>
++            </div>
++            <Field label="Credit for returned goods (৳) — already paid on the original order">
++              <input type="number" min={0} value={exchangeCredit} onChange={(e) => setExchangeCredit(Math.max(0, Number(e.target.value) || 0))} className={inputClass} style={inputStyle} />
++            </Field>
++            <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
++              The customer pays: new products − credit + delivery charge. If the Steadfast COD is less than the courier charge it is counted as a courier loss; if it is more, as profit.
++            </p>
++          </div>
++        ) : (
++          <div className="relative">
++            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-faint)" }} />
++            <input value={exchangeQuery} onChange={(e) => setExchangeQuery(e.target.value)} placeholder="Search a delivered order by number, name or phone to exchange…" className={`${inputClass} pl-8`} style={inputStyle} />
++            {exchangeResults.length > 0 && (
++              <div className="mt-1 divide-y rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
++                {exchangeResults.map((o) => (
++                  <button key={o.id} type="button" onClick={() => chooseExchangeOrder(o)} className="focus-ring flex w-full items-center justify-between px-3 py-2 text-left text-[13px]">
++                    <span style={{ color: "var(--text)" }}>#{o.orderNumber} · {o.customerName}</span>
++                    <span style={{ color: "var(--text-muted)" }}>{formatTaka(productSubtotal(o) - totalDiscount(o), 2)}</span>
++                  </button>
++                ))}
++              </div>
++            )}
++          </div>
++        )}
++      </section>
++
+       {/* Section A — Customer Information */}
+       <section className="card space-y-4 p-5">
+         <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
+@@ -470,6 +546,7 @@ export default function CreateOrderPage() {
+         <SummaryRow label="Item Discounts" value={`- ${formatTaka(itemDiscountTotal, 2)}`} muted />
+         <SummaryRow label="Order Discount" value={`- ${formatTaka(orderDiscount, 2)}`} muted />
+         <SummaryRow label="Customer Delivery Charge" value={`+ ${formatTaka(deliveryCharge, 2)}`} muted />
++        {exchangeOriginal && <SummaryRow label={`Exchange credit (#${exchangeOriginal.orderNumber})`} value={`- ${formatTaka(creditApplied, 2)}`} muted />}
+         {deliveryCharge === 0 && courierEstimate > 0 && <SummaryRow label="Free Delivery — Courier Cost (loss, not part of COD)" value={formatTaka(courierEstimate, 2)} muted />}
+         <div className="mt-2 flex items-center justify-between border-t pt-2" style={{ borderColor: "var(--border)" }}>
+           <span className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
+diff --git a/src/app/(app)/orders/page.tsx b/src/app/(app)/orders/page.tsx
+index 1fbb631..d980b9f 100644
+--- a/src/app/(app)/orders/page.tsx
++++ b/src/app/(app)/orders/page.tsx
+@@ -633,6 +633,11 @@ function OrdersPageInner() {
+                     <Link href={`/orders/${o.id}`} className="text-[13px] font-medium hover:underline" style={{ color: "var(--text)" }}>
+                       #{o.orderNumber}
+                     </Link>
++                    {o.exchange && (
++                      <p className="text-[11px] font-medium" style={{ color: "var(--brand-strong)" }}>
++                        Exchange · #{o.exchange.originalOrderNumber}
++                      </p>
++                    )}
+                   </td>
+                   <td className="px-3 py-3">
+                     <p className="text-[13px]" style={{ color: "var(--text)" }}>
 diff --git a/src/app/api/courier/steadfast/open/route.ts b/src/app/api/courier/steadfast/open/route.ts
 index 0d23a1f..9cc26b5 100644
 --- a/src/app/api/courier/steadfast/open/route.ts
@@ -54,37 +281,30 @@ index f90fc88..d226c78 100644
      after(() => deliverDue().catch((e) => console.error("[webhooks] deliver failed", e)));
    }
 diff --git a/src/app/api/courier/steadfast/webhook/route.ts b/src/app/api/courier/steadfast/webhook/route.ts
-index 9dd6e52..adbcc46 100644
+index 9dd6e52..2bd5426 100644
 --- a/src/app/api/courier/steadfast/webhook/route.ts
 +++ b/src/app/api/courier/steadfast/webhook/route.ts
-@@ -87,7 +87,13 @@ export async function POST(req: NextRequest) {
-   const type = typeof event.notification_type === "string" ? event.notification_type.trim().toLowerCase() : "delivery_status";
+@@ -3,7 +3,7 @@ import { NextRequest, NextResponse, after } from "next/server";
+ import { tx } from "@/server/db";
+ import { deliverDue } from "@/server/publicapi/webhooks";
+ import { handleOrderStatusWhatsAppNotification } from "@/server/whatsapp";
+-import { applyStatusToOrder, loadOrderForConsignment } from "@/server/courier/apply-steadfast-status";
++import { applyStatusToOrder, loadOrderForConsignment, recordSteadfastCancelRequest } from "@/server/courier/apply-steadfast-status";
  
-   // ── Events that carry a consignment status or amount revision ──────────────
--  const isStatusEvent = type === "delivery_status" || type === "tracking_update" || type === "consignment_update";
-+  // `return_list` means the parcel was added to Steadfast's return manifest — i.e. it is coming back. When
-+  // the event identifies a parcel, apply it as a return status instead of only logging it (the order would
-+  // otherwise stay In Transit forever, because no separate delivery_status push is guaranteed to follow).
-+  const returnConsignment = event.consignment && typeof event.consignment === "object" && !Array.isArray(event.consignment) ? (event.consignment as Record<string, unknown>) : null;
-+  const returnListWithParcel = type === "return_list" && !!(event.invoice || event.consignment_id || returnConsignment?.invoice || returnConsignment?.consignment_id || returnConsignment?.id);
-+  if (returnListWithParcel && !event.status) event = { ...event, status: "return_list" };
-+  const isStatusEvent = type === "delivery_status" || type === "tracking_update" || type === "consignment_update" || returnListWithParcel;
+ export const dynamic = "force-dynamic";
  
-   // ── Steadfast lifecycle / request notification types ───────────────────────
-   // These inform us of workflow state changes on Steadfast's side. Steadfast
-@@ -102,16 +108,17 @@ export async function POST(req: NextRequest) {
+@@ -102,6 +102,9 @@ export async function POST(req: NextRequest) {
    // user_update              — Steadfast account/user setting changed
    const LIFECYCLE_TYPES = [
      "return_list",
-+    "return_status", // seen in production logs (parcel return flow) — payload format undocumented, so only logged
++    "return_list_accepted", // documented: you confirmed receipt of a return list (carries the consignments in it)
++    "return_status", // seen in production logs, not in Steadfast's webhook docs — payload logged only
++    "payment_request", // documented: a payout was requested
      "accepted_payment_request",
      "cancel_request",
      "return_request",
-     "pickup_request",
-     "user_update",
-   ] as const;
--  const isLifecycleEvent = (LIFECYCLE_TYPES as readonly string[]).includes(type);
-+  const isLifecycleEvent = !isStatusEvent && (LIFECYCLE_TYPES as readonly string[]).includes(type);
+@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
+   const isLifecycleEvent = (LIFECYCLE_TYPES as readonly string[]).includes(type);
  
    if (!isStatusEvent && !isLifecycleEvent) {
 -    console.log(`[steadfast] ignoring unknown notification_type=${type}`);
@@ -92,7 +312,25 @@ index 9dd6e52..adbcc46 100644
      return NextResponse.json({ status: "received" });
    }
  
-@@ -166,7 +173,7 @@ export async function POST(req: NextRequest) {
+@@ -132,6 +135,17 @@ export async function POST(req: NextRequest) {
+         (invoice ? ` invoice=${invoice}` : "") +
+         ` | ${JSON.stringify(event).slice(0, 400)}`
+     );
++    if (type === "cancel_request" && (invoice || consignmentId)) {
++      try {
++        await tx(async (client) => {
++          const row = await loadOrderForConsignment(client, { invoice, consignmentId });
++          if (row) await recordSteadfastCancelRequest(client, row, event);
++        });
++      } catch (err) {
++        console.error("[steadfast] couldn't record cancel_request:", err);
++        return new NextResponse("Internal Server Error", { status: 500 });
++      }
++    }
+     return NextResponse.json({ status: "received" });
+   }
+ 
+@@ -166,7 +180,7 @@ export async function POST(req: NextRequest) {
  
      if (!result) {
        // Probably an order created outside RetailsPro — acknowledge so Steadfast stops retrying.
@@ -101,7 +339,7 @@ index 9dd6e52..adbcc46 100644
        return NextResponse.json({ status: "received" });
      }
  
-@@ -179,7 +186,7 @@ export async function POST(req: NextRequest) {
+@@ -179,7 +193,7 @@ export async function POST(req: NextRequest) {
      }
  
      console.log(
@@ -141,8 +379,270 @@ index 40df594..5598501 100644
          setForwardCharge(charge);
          const collected = Number(
            res.cod_amount ??
+diff --git a/src/lib/orders/exchange.test.ts b/src/lib/orders/exchange.test.ts
+new file mode 100644
+index 0000000..9eefd95
+--- /dev/null
++++ b/src/lib/orders/exchange.test.ts
+@@ -0,0 +1,52 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { collectedAmount, courierLoss, courierProfit, expectedCod, grossRevenue, productSales, salesRevenue } from "./utils";
++import type { Order } from "./types";
++
++function order(over: Partial<Order> = {}): Order {
++  return {
++    id: "o1", orderNumber: "ORD-1", status: "delivered", customerName: "A", phone: "017", address: "x",
++    items: [{ id: "i1", productId: "p", productName: "Shoe", variantId: "v", color: "", size: "", sku: "", price: 1000, qty: 1, discount: 0 }],
++    deliveryCharge: 100,
++    courier: { company: "Steadfast", trackingId: "1", forwardCost: 125, returnCost: 0, otherCost: 0 },
++    delivery: { customerPaid: 0 },
++    returnInfo: { returnRequired: false, returnReceived: false },
++    cancellation: {}, activity: [], createdAt: "2026-01-01", updatedAt: "2026-01-01",
++    ...over,
++  } as Order;
++}
++
++test("exchange COD = new items − credit + delivery charge, never below 0", () => {
++  assert.equal(expectedCod(order()), 1100);
++  assert.equal(expectedCod(order({ exchange: { originalOrderId: "x", originalOrderNumber: "ORD-0", credit: 1000 } })), 100);
++  assert.equal(expectedCod(order({ exchange: { originalOrderId: "x", originalOrderNumber: "ORD-0", credit: 5000 } })), 0);
++});
++
++test("delivered exchange: COD above the courier charge is courier profit, below is courier loss", () => {
++  const ex = { originalOrderId: "x", originalOrderNumber: "ORD-0", credit: 1000 };
++  const profit = order({ exchange: ex, delivery: { customerPaid: 130 } });
++  assert.equal(courierProfit(profit), 5);
++  assert.equal(courierLoss(profit), 0);
++  const loss = order({ exchange: ex, delivery: { customerPaid: 100 } });
++  assert.equal(courierLoss(loss), 25);
++  assert.equal(courierProfit(loss), 0);
++  // COD of ৳0 (free exchange): the whole courier charge is a loss, using the expected COD when nothing was recorded
++  const free = order({ exchange: { ...ex, credit: 1100 } });
++  assert.equal(collectedAmount(free), 0);
++  assert.equal(courierLoss(free), 125);
++});
++
++test("a normal delivered order has no courier profit/loss", () => {
++  const o = order({ delivery: { customerPaid: 1100 } });
++  assert.equal(courierProfit(o), 0);
++  assert.equal(courierLoss(o), 0);
++});
++
++test("once the exchange parcel is delivered the original keeps only its delivery charge", () => {
++  const original = order({ exchangeMoved: 1000 });
++  assert.equal(productSales(original), 0);
++  assert.equal(grossRevenue(original), 100);
++  assert.equal(salesRevenue(original), 100 - 125);
++  // before that, nothing changes
++  assert.equal(grossRevenue(order()), 1100);
++});
+diff --git a/src/lib/orders/store.tsx b/src/lib/orders/store.tsx
+index 9e035b1..617c588 100644
+--- a/src/lib/orders/store.tsx
++++ b/src/lib/orders/store.tsx
+@@ -43,6 +43,8 @@ export type NewOrderInput = {
+    */
+   freeDeliveryCourierCost?: number;
+   pos?: { invoiceId: string; invoiceNumber: string };
++  /** Exchange for a delivered order: its id, and the value of the goods coming back (credited against the COD). */
++  exchange?: { originalOrderId: string; credit: number };
+ };
+ 
+ export type DispatchInput = {
+@@ -204,6 +206,17 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
+     if (!(freeDeliveryCourierCost >= 0)) return { ok: false, error: "Courier charge can't be negative." };
+     if (orderDiscount > lineNet) return { ok: false, error: "Order discount can't be more than the order total." };
+ 
++    let exchangeInfo: Order["exchange"];
++    if (input.exchange) {
++      const original = orders.find((o) => o.id === input.exchange!.originalOrderId);
++      if (!original) return { ok: false, error: "The delivered order for this exchange could not be found." };
++      if (original.status !== "delivered") return { ok: false, error: "Only a Delivered order can be exchanged." };
++      if (original.exchange) return { ok: false, error: "An exchange order can't itself be exchanged — use the original delivered order." };
++      const credit = Number(input.exchange.credit);
++      if (!Number.isFinite(credit) || credit < 0) return { ok: false, error: "Exchange credit can't be negative." };
++      exchangeInfo = { originalOrderId: original.id, originalOrderNumber: original.orderNumber, credit };
++    }
++
+     // Availability check against live product stock (stock - reserved).
+     for (const line of input.items) {
+       const product = products.find((p) => p.id === line.productId);
+@@ -237,6 +250,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
+       notes: input.notes,
+       items: foldOrderDiscount(input.items, orderDiscount).map((i) => ({ ...i, id: crypto.randomUUID() })),
+       deliveryCharge: input.deliveryCharge,
++      ...(exchangeInfo ? { exchange: exchangeInfo } : {}),
+       ...(input.pos ? { source: "pos" as const, posInvoiceId: input.pos.invoiceId, posInvoiceNumber: input.pos.invoiceNumber } : {}),
+       courier: { company: "", trackingId: "", forwardCost: freeDeliveryCourierCost, returnCost: 0, otherCost: 0 },
+       delivery: { customerPaid: 0 },
+@@ -247,6 +261,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
+           "Order Created",
+           [
+             input.pos ? `From POS invoice ${input.pos.invoiceNumber}` : null,
++            exchangeInfo ? `Exchange for delivered order ${exchangeInfo.originalOrderNumber} · credit ৳${exchangeInfo.credit.toLocaleString()}` : null,
+             orderDiscount > 0 ? `Order discount ৳${orderDiscount.toLocaleString()} applied` : null,
+             freeDeliveryCourierCost > 0 ? `Free delivery — courier charge ৳${freeDeliveryCourierCost.toLocaleString()} counted as a loss` : null,
+           ]
+@@ -286,7 +301,19 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
+     } catch {}
+ 
+     reserveStock(itemsAsLineItems(order.items));
+-    setOrders((prev) => [order, ...prev]);
++    setOrders((prev) => [
++      order,
++      ...prev.map((o) =>
++        exchangeInfo && o.id === exchangeInfo.originalOrderId
++          ? {
++              ...o,
++              exchangedTo: [...(o.exchangedTo ?? []), { orderId: order.id, orderNumber }],
++              activity: [...o.activity, activity("Exchange order created", `${orderNumber} · credit ৳${exchangeInfo.credit.toLocaleString()}`)],
++              updatedAt: now,
++            }
++          : o
++      ),
++    ]);
+     return { ok: true, order };
+   }
+ 
+@@ -357,6 +384,17 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
+         qty: i.qty,
+       })),
+     });
++    // A Delivered exchange parcel takes the product value over from the original order, which then keeps only its delivery charge.
++    if (order.exchange) {
++      const { originalOrderId, credit } = order.exchange;
++      setOrders((prev) =>
++        prev.map((o) =>
++          o.id === originalOrderId
++            ? { ...o, exchangeMoved: credit, activity: [...o.activity, activity("Product value moved to exchange order", `${order.orderNumber} delivered · ৳${credit.toLocaleString()}`)], updatedAt: new Date().toISOString() }
++            : o
++        )
++      );
++    }
+     updateOrder(id, (o) => ({
+       ...o,
+       status: "delivered",
+diff --git a/src/lib/orders/types.ts b/src/lib/orders/types.ts
+index c7b81eb..f4372f5 100644
+--- a/src/lib/orders/types.ts
++++ b/src/lib/orders/types.ts
+@@ -105,6 +105,19 @@ export interface Order {
+   /** The other system's own order id — unique per channel, used to make retries safe. */
+   externalId?: string;
+ 
++  /**
++   * Set on an exchange order: the delivered order it replaces. `credit` is the value of the goods coming
++   * back (already paid on the original order), so the customer's COD is items − credit + delivery charge.
++   */
++  exchange?: { originalOrderId: string; originalOrderNumber: string; credit: number };
++  /** Set on the delivered order once exchange order(s) have been raised against it. */
++  exchangedTo?: { orderId: string; orderNumber: string }[];
++  /**
++   * Product value that moved to a delivered exchange order. Written once that exchange parcel is Delivered;
++   * until then the original order keeps its full amounts. The original order then keeps only its delivery charge.
++   */
++  exchangeMoved?: number;
++
+   courier: CourierInfo;
+   delivery: DeliveryResult;
+   returnInfo: ReturnInfo;
+diff --git a/src/lib/orders/utils.ts b/src/lib/orders/utils.ts
+index d98dcf4..2d2b412 100644
+--- a/src/lib/orders/utils.ts
++++ b/src/lib/orders/utils.ts
+@@ -57,9 +57,19 @@ export function totalDiscount(order: Order): number {
+   return order.items.reduce((sum, i) => sum + i.discount, 0);
+ }
+ 
+-/** Expected COD = Product Subtotal - Discount + Customer Delivery Charge */
++/** True for an order raised to exchange goods from an already-delivered order. */
++export function isExchangeOrder(order: Pick<Order, "exchange">): boolean {
++  return !!order.exchange;
++}
++
++/**
++ * Expected COD = Product Subtotal - Discount + Customer Delivery Charge.
++ * An exchange order also subtracts the credit for the goods coming back (never below ৳0): the customer
++ * already paid for those on the original order, so they only pay the difference plus the delivery charge.
++ */
+ export function expectedCod(order: Order): number {
+-  return productSubtotal(order) - totalDiscount(order) + order.deliveryCharge;
++  const cod = productSubtotal(order) - totalDiscount(order) + order.deliveryCharge;
++  return order.exchange ? Math.max(0, cod - order.exchange.credit) : cod;
+ }
+ 
+ /**
+@@ -106,7 +116,8 @@ export function totalItemQty(order: Order): number {
+  */
+ export function productSales(order: Order): number {
+   if (order.status !== "delivered") return 0;
+-  return productSubtotal(order) - totalDiscount(order);
++  // After an exchange parcel is Delivered the original keeps only its delivery charge: the product value moved to it.
++  return Math.max(0, productSubtotal(order) - totalDiscount(order) - (order.exchangeMoved ?? 0));
+ }
+ 
+ /**
+@@ -147,15 +158,18 @@ export function courierCostForSummary(order: Order): number {
+   return actualCourierCost(order);
+ }
+ 
+-/** Courier Profit — only meaningful (and only positive) for Partial Delivered. */
++/** Courier Profit — Partial Delivered, and a Delivered exchange parcel (COD collected above the courier charge). */
+ export function courierProfit(order: Order): number {
++  // A delivered exchange parcel works like a partial delivery: COD collected minus the courier charge.
++  if (order.status === "delivered" && order.exchange) return Math.max(0, collectedAmount(order) - actualCourierCost(order));
+   if (order.status !== "partial_delivered") return 0;
+   return Math.max(0, courierNet(order));
+ }
+ 
+-/** Courier Loss — Partial Delivered (if net negative) or full cost for Refuse Return. */
++/** Courier Loss — Partial Delivered or Delivered exchange (if COD < courier charge), or full cost for Refuse Return. */
+ export function courierLoss(order: Order): number {
+   if (order.status === "refuse_return") return actualCourierCost(order);
++  if (order.status === "delivered" && order.exchange) return Math.max(0, actualCourierCost(order) - collectedAmount(order));
+   if (order.status === "partial_delivered") return Math.max(0, -courierNet(order));
+   return 0;
+ }
+diff --git a/src/server/accounting/auto-post.ts b/src/server/accounting/auto-post.ts
+index 1bd3e39..cd6546b 100644
+--- a/src/server/accounting/auto-post.ts
++++ b/src/server/accounting/auto-post.ts
+@@ -6,7 +6,7 @@ import type { Order } from "@/lib/orders/types";
+ import type { Product } from "@/lib/products/types";
+ import type { PurchaseOrder } from "@/lib/purchase-orders/types";
+ import type { PosInvoice, PosReturn } from "@/lib/pos/types";
+-import { actualCourierCost, grossRevenue } from "@/lib/orders/utils";
++import { actualCourierCost, expectedCod, grossRevenue } from "@/lib/orders/utils";
+ import { allocateLandedCost, consumeFifo } from "@/lib/accounting/fifo";
+ import { bumpRev } from "@/server/seed";
+ 
+@@ -171,16 +171,18 @@ export async function postAccountingChanges(client: PoolClient, changes: Account
+     }
+     if (isInitialOutcome) {
+       const billed = order.status === "partial_delivered" ? order.delivery.customerPaid : grossRevenue(order);
+-      const collected = order.status === "partial_delivered" ? billed : (order.delivery.customerPaid || billed);
++      // An exchange order's COD is lower than its billed amount (the returned goods are credited), and may be ৳0.
++      const collected = order.status === "partial_delivered" ? billed : (order.delivery.customerPaid || (order.exchange ? expectedCod(order) : billed));
+       const lines: JournalEntryInputLine[] = [{ code: "1100", debit: collected, credit: 0 }];
+       if (order.status === "delivered") {
+         const itemTotal = [...revenueByCode.values()].reduce((sum, amount) => sum + amount, 0);
+         const deliveryBilled = Math.max(0, billed - itemTotal);
+         const revenueTotal = itemTotal + deliveryBilled;
+-        const scale = revenueTotal > 0 ? collected / revenueTotal : 0;
+-        for (const [code, amount] of revenueByCode) lines.push({ code, debit: 0, credit: round2(amount * scale) });
+-        if (deliveryBilled) lines.push({ code: "4010", debit: 0, credit: round2(deliveryBilled * scale) });
+-        if (collected < revenueTotal) lines.push({ code: "4040", debit: round2(revenueTotal - collected), credit: 0 });
++        // Revenue is always credited in full; any gap to the cash collected is balanced by one adjustment line
++        // (scaling the revenue as well as adding the gap made this journal unbalanced whenever collected ≠ billed).
++        for (const [code, amount] of revenueByCode) lines.push({ code, debit: 0, credit: round2(amount) });
++        if (deliveryBilled) lines.push({ code: "4010", debit: 0, credit: round2(deliveryBilled) });
++        if (collected < revenueTotal) lines.push({ code: "4040", debit: round2(revenueTotal - collected), credit: 0, memo: order.exchange ? `Exchange credit · returned goods from ${order.exchange.originalOrderNumber}` : undefined });
+         else if (collected > revenueTotal) lines.push({ code: "4010", debit: 0, credit: round2(collected - revenueTotal) });
+       } else lines.push({ code: "4010", debit: 0, credit: collected });
+       lines.push(...saleLines);
 diff --git a/src/server/courier/apply-steadfast-status.ts b/src/server/courier/apply-steadfast-status.ts
-index 14774dc..39517c6 100644
+index 14774dc..be45432 100644
 --- a/src/server/courier/apply-steadfast-status.ts
 +++ b/src/server/courier/apply-steadfast-status.ts
 @@ -5,7 +5,7 @@ import { bumpRev } from "@/server/seed";
@@ -239,6 +739,67 @@ index 14774dc..39517c6 100644
    const nothingNew =
      prev.status === order.status &&
      JSON.stringify(prev.courier) === JSON.stringify(order.courier) &&
+@@ -188,6 +225,27 @@ export async function applyStatusToOrder(
+       where collection = 'orders' and id = $1`,
+     [order.id, JSON.stringify(order), updatedBy]
+   );
++  // A Delivered exchange parcel takes the product value over from the original order (which keeps only its delivery charge).
++  if (prev.status !== "delivered" && order.status === "delivered" && order.exchange) {
++    const { rows: originalRows } = await client.query<{ data: Order }>(
++      `select data from app_records where collection = 'orders' and id = $1 for update`,
++      [order.exchange.originalOrderId]
++    );
++    const original = originalRows[0]?.data;
++    if (original && original.exchangeMoved !== order.exchange.credit) {
++      original.exchangeMoved = order.exchange.credit;
++      original.activity = [
++        ...original.activity,
++        { id: crypto.randomUUID(), at: now, label: "Product value moved to exchange order", detail: `${order.orderNumber} delivered · ৳${order.exchange.credit.toLocaleString()}`, by: "Steadfast" },
++      ];
++      original.updatedAt = now;
++      await client.query(
++        `update app_records set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = $3
++          where collection = 'orders' and id = $1`,
++        [order.exchange.originalOrderId, JSON.stringify(original), updatedBy]
++      );
++    }
++  }
+   await bumpRev(client, "orders");
+ 
+   await postAccountingChanges(client, { orders: new Map([[order.id, { before: prev, after: order }]]) }, updatedBy);
+@@ -267,3 +325,32 @@ export async function applyStatusToOrder(
+     whatsapp: prev.status !== order.status ? { prev, next: JSON.parse(JSON.stringify(order)) } : undefined,
+   };
+ }
++
++/**
++ * Steadfast `cancel_request` (a cancellation was raised or decided for a parcel). Its `verify_status` codes
++ * aren't documented, so this does NOT change the order status — it only writes the request to the order's
++ * activity log so it's visible on the order. Repeats of the same request/verify_status are skipped.
++ */
++export async function recordSteadfastCancelRequest(
++  client: PoolClient,
++  row: Row,
++  event: Record<string, unknown>
++): Promise<boolean> {
++  const order: Order = row.data;
++  const requestId = String(event.cancel_request_id ?? "").trim();
++  const verify = String(event.verify_status ?? "").trim();
++  const note = String(event.note ?? "").replace(/^"+|"+$/g, "").trim();
++  const detail =
++    `Cancellation request${requestId ? ` #${requestId}` : ""} · verify_status ${verify || "—"}` + (note ? ` · ${note}` : "");
++  if (order.activity.some((a) => a.label === "Steadfast cancellation request" && a.detail === detail)) return false;
++  const now = new Date().toISOString();
++  order.activity = [...order.activity, { id: crypto.randomUUID(), at: now, label: "Steadfast cancellation request", detail, by: "Steadfast" }];
++  order.updatedAt = now;
++  await client.query(
++    `update app_records set data = $2::jsonb, version = version + 1, updated_at = now(), updated_by = 'steadfast_webhook'
++      where collection = 'orders' and id = $1`,
++    [order.id, JSON.stringify(order)]
++  );
++  await bumpRev(client, "orders");
++  return true;
++}
 diff --git a/src/server/courier/steadfast-status.test.ts b/src/server/courier/steadfast-status.test.ts
 index f51c582..741de73 100644
 --- a/src/server/courier/steadfast-status.test.ts
@@ -266,10 +827,20 @@ index f51c582..741de73 100644
 +  assert.equal(readDeliveryCharge({ delivery_fee: 80 }), 80);
 +});
 diff --git a/src/server/courier/steadfast-status.ts b/src/server/courier/steadfast-status.ts
-index 2d78fc8..f1edb3a 100644
+index 2d78fc8..1dd4c47 100644
 --- a/src/server/courier/steadfast-status.ts
 +++ b/src/server/courier/steadfast-status.ts
-@@ -162,3 +162,17 @@ export function readCourierPaidAmount(event: Record<string, unknown> | null | un
+@@ -84,6 +84,9 @@ export function readPaidAmount(source: Record<string, unknown> | null | undefine
+   const codKeys = [
+     "cod_amount",
+     "codAmount",
++    "cod",
++    "cod_amt",
++    "new_cod_amount",
+     "amount",
+   ];
+   for (const key of collectedKeys) {
+@@ -162,3 +165,17 @@ export function readCourierPaidAmount(event: Record<string, unknown> | null | un
    if (changedCod !== null) return changedCod;
    return readPaidAmount(consignment) ?? readPaidAmount(event);
  }
