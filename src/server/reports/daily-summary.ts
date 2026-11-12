@@ -14,6 +14,9 @@ import type {
 import type { Order } from "@/lib/orders/types";
 import type { SettlementMode } from "@/lib/settings/types";
 import { computeCodPending, type CodOrderInput, type CodSettings } from "./cod";
+import { dhakaDay, REPORT_TIME_ZONE } from "./business-day";
+
+export { dhakaDay, REPORT_TIME_ZONE } from "./business-day";
 
 export type {
   ChannelBreakdownRow,
@@ -24,9 +27,6 @@ export type {
   ReportBundle,
 } from "@/lib/reports/types";
 export { isReportChannel, type ReportChannel } from "@/lib/reports/types";
-
-/** Business day used by every report. Stored timestamps are UTC instants. */
-export const REPORT_TIME_ZONE = "Asia/Dhaka";
 
 // ── SQL fragments ──────────────────────────────────────────────────────────
 
@@ -458,21 +458,6 @@ interface SettingsDoc {
     codChargePct?: number;
     riskManagementPct?: number;
   };
-}
-
-const dhakaDayFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: REPORT_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-export function dhakaDay(value: string | Date | null | undefined): string | null {
-  if (!value) return null;
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return dhakaDayFormat.format(date);
 }
 
 function deliveryDayFor(order: Order): string | null {

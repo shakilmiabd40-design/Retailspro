@@ -9,8 +9,8 @@ import type { PurchaseOrder } from "@/lib/purchase-orders/types";
 import { useAccess } from "@/lib/settings/access";
 import {
   DEFAULT_SETTINGS,
-  NOTIFIABLE_STATUSES,
   OWNER_ROLE_LABELS,
+  clampSettings,
   deriveStatus,
   escalateOverdue,
   escalationTargetFor,
@@ -75,25 +75,6 @@ interface NotificationsContextValue {
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
-
-function clampSettings(s: NotificationSettings): NotificationSettings {
-  const num = (v: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
-  const emergency = num(s.emergencyThreshold, 0, 1000);
-  const reorder = Math.max(emergency, num(s.reorderPoint, 0, 1000));
-  const escalationMinutes: NotificationSettings["escalationMinutes"] = {};
-  for (const [k, v] of Object.entries(s.escalationMinutes)) escalationMinutes[k as InventoryStatus] = num(v ?? 0, 0, 10080);
-  const disabledStatuses = [...new Set((s.disabledStatuses ?? []).filter((st) => NOTIFIABLE_STATUSES.includes(st)))];
-  return {
-    ...s,
-    emergencyThreshold: emergency,
-    reorderPoint: reorder,
-    monitorMultiplier: num(s.monitorMultiplier, 1, 20),
-    hysteresisPct: num(s.hysteresisPct, 0, 50),
-    orderUpToMultiplier: num(s.orderUpToMultiplier, 1, 50),
-    escalationMinutes,
-    disabledStatuses,
-  };
-}
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";

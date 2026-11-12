@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -34,7 +34,7 @@ export default function SyncHealthReportPage() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<SyncFailureItem | null>(null);
 
-  const loadData = async (showSpinner = true) => {
+  const loadData = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
       const res = await api<SyncHealthResponse>("GET", "/api/reports/sync-health");
@@ -44,13 +44,15 @@ export default function SyncHealthReportPage() {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  };
+  }, [showToast]);
 
   useEffect(() => {
-    void loadData();
+    startTransition(() => {
+      void loadData();
+    });
     const interval = setInterval(() => void loadData(false), 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadData]);
 
   const handleRetry = async (id: string) => {
     setRetryingId(id);
@@ -58,8 +60,8 @@ export default function SyncHealthReportPage() {
       const res = await api<{ ok: boolean; orderNumber: string }>("POST", "/api/reports/sync-health/retry", { id });
       showToast(`Sync retry successful! Created Order #${res.orderNumber}`);
       void loadData();
-    } catch (err: any) {
-      showToast(err?.message || "Retry failed", "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Retry failed", "error");
     } finally {
       setRetryingId(null);
     }
@@ -136,7 +138,7 @@ export default function SyncHealthReportPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-5">
           <div className="flex items-center justify-between text-[12.5px]" style={{ color: "var(--text-muted)" }}>
-            <span>Today's Synced Orders</span>
+            <span>Today&apos;s Synced Orders</span>
             <CheckCircle2 size={16} className="text-emerald-500" />
           </div>
           <p className="mt-2 text-[26px] font-bold tabular-nums" style={{ color: "var(--text)" }}>

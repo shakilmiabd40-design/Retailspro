@@ -52,9 +52,10 @@ export function ReturnsProvider({ children }: { children: ReactNode }) {
   const { getOrder } = useOrders();
   const { voidWarrantiesForOrderItem } = useWarranty();
   const { settings } = useSettings();
-  const returnsActive = pathname.startsWith("/returns") || pathname.startsWith("/reports/product-sales") ||
-    pathname.startsWith("/reports/suppliers") ||
-    pathname.startsWith("/suppliers/");
+  // Product Sales and Supplier reports read their returns through
+  // /api/reports/product-sales and /api/reports/suppliers, so those routes no
+  // longer need the complete returns collection.
+  const returnsActive = pathname.startsWith("/returns") || pathname.startsWith("/suppliers/");
   const [returns, setReturns, hydrated] = useCollection<ReturnRecord>("returns", undefined, returnsActive);
 
   const getReturn = (id: string) => returns.find((r) => r.id === id);

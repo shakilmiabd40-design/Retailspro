@@ -1,4 +1,3 @@
-import type { Product } from "@/lib/products/types";
 import type { PurchaseOrder } from "@/lib/purchase-orders/types";
 import type {
   Channel,
@@ -103,6 +102,29 @@ export const DEFAULT_SETTINGS: NotificationSettings = {
   locationId: "main",
 };
 
+/**
+ * Keeps stored thresholds inside sane bounds, so a hand-edited document can never
+ * produce a negative reorder point or a monitor band below the emergency threshold.
+ */
+export function clampSettings(s: NotificationSettings): NotificationSettings {
+  const num = (v: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
+  const emergency = num(s.emergencyThreshold, 0, 1000);
+  const reorder = Math.max(emergency, num(s.reorderPoint, 0, 1000));
+  const escalationMinutes: NotificationSettings["escalationMinutes"] = {};
+  for (const [k, v] of Object.entries(s.escalationMinutes)) escalationMinutes[k as InventoryStatus] = num(v ?? 0, 0, 10080);
+  const disabledStatuses = [...new Set((s.disabledStatuses ?? []).filter((st) => NOTIFIABLE_STATUSES.includes(st)))];
+  return {
+    ...s,
+    emergencyThreshold: emergency,
+    reorderPoint: reorder,
+    monitorMultiplier: num(s.monitorMultiplier, 1, 20),
+    hysteresisPct: num(s.hysteresisPct, 0, 50),
+    orderUpToMultiplier: num(s.orderUpToMultiplier, 1, 50),
+    escalationMinutes,
+    disabledStatuses,
+  };
+}
+
 /** Whether a category is turned on in Settings → Notifications → Categories. */
 export function isStatusEnabled(status: InventoryStatus, cfg: NotificationSettings): boolean {
   return !cfg.disabledStatuses.includes(status);
@@ -203,7 +225,18 @@ export interface SkuSnapshot {
 
 const OPEN_PO_STATUSES = ["approved", "sent", "partially_received"];
 
-export function snapshotSkus(products: Product[], purchaseOrders: PurchaseOrder[]): SkuSnapshot[] {
+/** The product fields a stock snapshot needs — the full `Product` record satisfies this. */
+export interface SnapshotProduct {
+  id: string;
+  name: string;
+  brand?: string;
+  shoeType?: string;
+  material?: string;
+  status: string;
+  variants: { id: string; sku: string; color: string; size: string; stock: number; reserved?: number; status: string }[];
+}
+
+export function snapshotSkus(products: SnapshotProduct[], purchaseOrders: PurchaseOrder[]): SkuSnapshot[] {
   const incoming = new Map<string, { qty: number; poId: string; poNumber: string }>();
   const poNumbers = new Map<string, string[]>();
   const sortedPos = [...purchaseOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

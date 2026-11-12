@@ -177,7 +177,10 @@ export default function CreateOrderPage() {
       utm: campaign.trim() ? { campaign: campaign.trim(), source: orderSource } : undefined,
       freeDeliveryCourierCost: deliveryCharge === 0 ? courierEstimate : undefined,
       ...(exchangeOriginal ? { exchange: { originalOrderId: exchangeOriginal.id, credit: creditApplied } } : {}),
-      items: items.map(({ id: _id, ...rest }) => rest),
+      items: items.map(({ id: _id, ...rest }) => {
+        void _id;
+        return rest;
+      }),
     });
     if (!result.ok) {
       showToast(result.error, "error");

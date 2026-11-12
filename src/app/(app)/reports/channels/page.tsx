@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, FileSpreadsheet, Store } from "lucide-react";
+import { ArrowLeft, Download, FileSpreadsheet } from "lucide-react";
 import { api } from "@/lib/persist/api";
 import { formatTaka } from "@/lib/products/utils";
 import { PRESETS, presetRange, type PresetKey } from "@/lib/reports/dates";
 import { downloadCsv, downloadXlsx, type ExportColumn } from "@/lib/reports/export";
-import type { DailySummaryRow, ExecutiveKpiSummary } from "@/lib/reports/types";
+import type { ChannelBreakdownRow, DailySummaryRow, ExecutiveKpiSummary } from "@/lib/reports/types";
 import {
   Bar,
   BarChart,
@@ -26,7 +26,7 @@ interface ChannelReportData {
 }
 
 export default function SalesByChannelPage() {
-  const [preset, setPreset] = useState<PresetKey>("this_month");
+  const [preset, setPreset] = useState<PresetKey | "custom">("this_month");
   const [dateRange, setDateRange] = useState(() => presetRange("this_month"));
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ChannelReportData | null>(null);
@@ -39,7 +39,7 @@ export default function SalesByChannelPage() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api<ChannelReportData>(
@@ -52,22 +52,25 @@ export default function SalesByChannelPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange.from, dateRange.to]);
 
   useEffect(() => {
-    void loadData();
-  }, [dateRange.from, dateRange.to]);
+    startTransition(() => {
+      void loadData();
+    });
+  }, [loadData]);
 
   const canSeeCost = data?.canSeeCostAndProfit ?? false;
   const channelBreakdown = data?.kpis.channelBreakdown ?? [];
   const totalRevenue = data?.kpis.realizedRevenue || 0;
 
   // Chart data: Group rows by date, stacked by channel
+  const rows = data?.rows;
   const chartData = useMemo(() => {
-    if (!data?.rows) return [];
+    if (!rows) return [];
     const dateMap = new Map<string, Record<string, number>>();
 
-    for (const r of data.rows) {
+    for (const r of rows) {
       const d = r.reportDate;
       if (!d) continue;
       const cur = dateMap.get(d) ?? { website: 0, facebook: 0, instagram: 0, shop: 0, unattributed: 0, total: 0 };
@@ -80,10 +83,10 @@ export default function SalesByChannelPage() {
     return [...dateMap.entries()]
       .map(([date, counts]) => ({ date, ...counts }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [data?.rows]);
+  }, [rows]);
 
-  const exportColumns = useMemo<ExportColumn<any>[]>(() => {
-    const cols: ExportColumn<any>[] = [
+  const exportColumns = useMemo<ExportColumn<ChannelBreakdownRow>[]>(() => {
+    const cols: ExportColumn<ChannelBreakdownRow>[] = [
       { header: "Channel", value: (r) => (r.channel === "shop" ? "Walk-in Shop" : r.channel === "unattributed" ? "Unattributed" : r.channel) },
       { header: "Delivered Orders", value: (r) => r.deliveredOrders },
       { header: "Net Revenue (BDT)", value: (r) => r.netRevenue },
@@ -170,7 +173,7 @@ export default function SalesByChannelPage() {
             type="date"
             value={dateRange.from}
             onChange={(e) => {
-              setPreset("custom" as any);
+              setPreset("custom");
               setDateRange((prev) => ({ ...prev, from: e.target.value }));
             }}
             className="rounded-lg border px-2 py-1 text-[12px]"
@@ -181,7 +184,7 @@ export default function SalesByChannelPage() {
             type="date"
             value={dateRange.to}
             onChange={(e) => {
-              setPreset("custom" as any);
+              setPreset("custom");
               setDateRange((prev) => ({ ...prev, to: e.target.value }));
             }}
             className="rounded-lg border px-2 py-1 text-[12px]"
@@ -241,7 +244,7 @@ export default function SalesByChannelPage() {
                     <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `৳${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
-                    <Tooltip formatter={(v: any) => [`৳${Number(v).toLocaleString()}`, ""]} />
+                    <Tooltip formatter={(v) => [`৳${Number(v).toLocaleString()}`, ""]} />
                     <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "8px" }} />
                     <Bar dataKey="website" name="Website" fill="#3b82f6" stackId="a" />
                     <Bar dataKey="facebook" name="Facebook" fill="#8b5cf6" stackId="a" />

@@ -1,89 +1,57 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useProducts } from "@/lib/products/store";
-import { matchesProductFilters, productMeta } from "@/lib/reports/orders";
-import { formatDay, type DateTypeKey } from "@/lib/reports/dates";
-import { num, sum, taka, ymd } from "@/lib/reports/format";
+import { formatDay, parseDate } from "@/lib/reports/dates";
+import { num, sum, taka } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
+import { useInventoryValueReport } from "@/lib/reports/use-report";
+import type { InventoryValueRow } from "@/lib/reports/types";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { RankBars } from "@/components/reports/charts";
-import { useLastSoldDates } from "@/lib/reports/use-last-sold";
 
-interface ValueRow {
-  variantId: string;
-  product: string;
-  variant: string;
-  sku: string;
-  category: string;
-  qty: number;
-  unitCost: number;
-  value: number;
-  lastSold: Date | null;
-  dead: boolean;
-}
-
-const DAY_MS = 86_400_000;
-
-const DATE_TYPES: DateTypeKey[] = ["order_created"];
+const DATE_TYPES: ("order_created")[] = ["order_created"];
 
 export default function InventoryValuationReportPage() {
   const state = useReportFilters("order_created");
   const f = state.applied;
-  const { products, hydrated } = useProducts();
-  const { lastSold, loading: salesLoading, error: salesError } = useLastSoldDates();
   const [deadDays, setDeadDays] = useState(60);
   const [deadOnly, setDeadOnly] = useState(false);
-  const [now] = useState(() => Date.now());
 
-  const all = useMemo<ValueRow[]>(() => {
-    const meta = productMeta(products);
-    const cutoff = now - Math.max(1, deadDays) * DAY_MS;
-    const out: ValueRow[] = [];
-    for (const p of products) {
-      for (const v of p.variants) {
-        if (v.stock <= 0 || !matchesProductFilters({ productId: p.id, sku: v.sku }, f, meta)) continue;
-        const sold = lastSold.get(v.id) ?? null;
-        out.push({
-          variantId: v.id,
-          product: p.name,
-          variant: `${v.color} / ${v.size}`,
-          sku: v.sku,
-          category: p.category || "Uncategorized",
-          qty: v.stock,
-          unitCost: v.cost,
-          value: v.stock * v.cost,
-          lastSold: sold,
-          dead: !sold || sold.getTime() < cutoff,
-        });
-      }
-    }
-    return out.sort((a, b) => b.value - a.value);
-  }, [products, lastSold, f, deadDays, now]);
+  const { data, loading, error } = useInventoryValueReport({
+    category: f.category,
+    brand: f.brand,
+    productId: f.productId,
+    sku: f.sku,
+    deadDays: String(deadDays),
+  });
+
+  const all = useMemo(() => data?.rows ?? [], [data]);
+  const kpis = data?.kpis;
+  const canSeeCost = data?.canSeeCost ?? false;
 
   const rows = useMemo(() => all.filter((r) => !deadOnly || r.dead), [all, deadOnly]);
 
   const byCategory = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of all) m.set(r.category, (m.get(r.category) ?? 0) + r.value);
+    for (const r of all) m.set(r.category, (m.get(r.category) ?? 0) + (r.value ?? 0));
     return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value: Math.round(value) }));
   }, [all]);
 
-  if (!hydrated || salesLoading) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
-  if (salesError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{salesError}</p>;
+  if (error) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>;
+  if (loading || !kpis) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
 
   const dead = all.filter((r) => r.dead);
 
-  const columns: Column<ValueRow>[] = [
+  const columns: Column<InventoryValueRow>[] = [
     { key: "sku", header: "SKU", value: (r) => r.sku, total: () => "Total" },
     { key: "product", header: "Product", value: (r) => r.product },
     { key: "variant", header: "Variant (color/size)", value: (r) => r.variant },
     { key: "qty", header: "Qty", align: "right", value: (r) => r.qty, total: (rs) => num(sum(rs, (r) => r.qty)) },
-    { key: "cost", header: "Unit Cost", align: "right", value: (r) => r.unitCost, cell: (r) => taka(r.unitCost) },
-    { key: "value", header: "Total Value", align: "right", value: (r) => r.value, cell: (r) => taka(r.value), total: (rs) => taka(sum(rs, (r) => r.value)) },
-    { key: "last", header: "Last Sold Date", value: (r) => ymd(r.lastSold), cell: (r) => (r.lastSold ? formatDay(r.lastSold) : "Never sold") },
+    { key: "cost", header: "Unit Cost", align: "right", value: (r) => r.unitCost, cell: (r) => (r.unitCost === null ? "—" : taka(r.unitCost)) },
+    { key: "value", header: "Total Value", align: "right", value: (r) => r.value, cell: (r) => (r.value === null ? "—" : taka(r.value)), total: (rs) => (kpis.totalValue === null ? "—" : taka(sum(rs, (r) => r.value ?? 0))) },
+    { key: "last", header: "Last Sold Date", value: (r) => r.lastSoldDay ?? "", cell: (r) => (r.lastSoldDay ? formatDay(parseDate(r.lastSoldDay)) : "Never sold") },
     {
       key: "dead",
       header: "Dead Stock",
@@ -119,10 +87,10 @@ export default function InventoryValuationReportPage() {
 
       <KpiGrid
         items={[
-          { label: "Total inventory qty", value: num(sum(all, (r) => r.qty)) },
-          { label: "Total inventory value", value: taka(sum(all, (r) => r.value)), tone: "brand", sub: "At cost" },
-          { label: "Dead stock qty", value: num(sum(dead, (r) => r.qty)), tone: dead.length ? "warn" : "neutral", sub: `${num(dead.length)} variants` },
-          { label: "Dead stock value", value: taka(sum(dead, (r) => r.value)), tone: dead.length ? "warn" : "neutral" },
+          { label: "Total inventory qty", value: num(kpis.totalQty) },
+          { label: "Total inventory value", value: kpis.totalValue === null ? "—" : taka(kpis.totalValue), tone: "brand", sub: canSeeCost ? "At cost" : "Cost hidden" },
+          { label: "Dead stock qty", value: num(kpis.deadQty), tone: dead.length ? "warn" : "neutral", sub: `${num(dead.length)} variants` },
+          { label: "Dead stock value", value: kpis.deadValue === null ? "—" : taka(kpis.deadValue), tone: dead.length ? "warn" : "neutral" },
         ]}
       />
 

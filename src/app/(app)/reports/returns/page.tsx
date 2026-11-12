@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/persist/api";
-import type { ReturnRecord } from "@/lib/returns/types";
 import { RETURN_STATUS_LABELS } from "@/lib/returns/utils";
 import type { ReturnType } from "@/lib/returns/types";
 import { formatDay, inRange, type DateTypeKey } from "@/lib/reports/dates";
 import { countBy } from "@/lib/reports/aggregate";
 import { num, sum, ymd } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
+import { useReturnsReport } from "@/lib/reports/use-report";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
@@ -38,19 +37,10 @@ export default function ReturnsReportPage() {
   const state = useReportFilters("return_received");
   const f = state.applied;
   const [tab, setTab] = useState<ReturnType>("customer");
-  const [returns, setReturns] = useState<ReturnRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const { data, loading, error } = useReturnsReport({ from: f.from, to: f.to, type: tab });
 
-  useEffect(() => {
-    let current = true;
-    setLoading(true);
-    api<{ returns: ReturnRecord[] }>("GET", `/api/reports/returns?from=${encodeURIComponent(f.from)}&to=${encodeURIComponent(f.to)}&type=${tab}`)
-      .then((result) => { if (current) { setReturns(result.returns); setLoadError(""); } })
-      .catch((error) => { if (current) setLoadError(error instanceof Error ? error.message : "Could not load the returns report."); })
-      .finally(() => { if (current) setLoading(false); });
-    return () => { current = false; };
-  }, [f.from, f.to, tab]);
+  const returns = useMemo(() => data?.returns ?? [], [data]);
+  const loadError = error;
 
   const ofTab = useMemo(() => returns.filter((r) => r.type === tab), [returns, tab]);
 

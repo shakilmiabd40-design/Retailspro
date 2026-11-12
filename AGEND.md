@@ -19,21 +19,39 @@ Reduce initial load and large list/report transfer time without changing order, 
 - Dashboard stock-alert polling sends only the source revision when snapshots are unchanged, avoiding repeated transfer of the entire variant snapshot.
 - Orders, returns, and warranty collections activate only on workflows and reports that consume them. The sidebar uses a small revision-cached status-count query on routes where the full orders collection is not loaded.
 - Returns and warranty reports now fetch date-bounded candidate rows through permission-checked read APIs; those report routes no longer activate their complete returns/warranties sync collections. Existing browser-local date filtering still applies to preserve inclusive date semantics.
-- Order, courier, sales/COD, summary, and product-sales reports fetch date-bounded order candidates through a permission-checked API. Inventory valuation fetches delivered line history without transferring whole order records. These report routes no longer activate the full Orders collection; settlement reporting retains it because settlement writes update order flags.
+- Order, courier, sales/COD, summary, and product-sales reports fetch date-bounded order candidates through a permission-checked API. Sales & COD and Courier Cost & Profit/Loss now go further: dedicated `/api/reports/sales-cod` and `/api/reports/courier` endpoints return compact rows and KPIs, and the report day is the fixed Asia/Dhaka calendar day. These report routes no longer activate the full Orders collection; settlement reporting retains it because settlement writes update order flags.
+- Order Status and Product Sales moved to dedicated `/api/reports/order-status` and `/api/reports/product-sales` endpoints that return compact rows. Product Sales reads product category/brand from a narrow server query and its customer returns from the server-side return candidates.
+- Purchase, Supplier, Inventory Stock and Inventory Valuation moved to dedicated endpoints too. Purchase orders, returns and the product catalog are read narrowly on the server, so the report pages no longer compute from whole collections in the browser. Product cost is only sent to roles with the products "financial" permission.
+- The Returns and Warranty reports now load their candidates through the shared report hook instead of a hand-rolled fetch in an effect.
+- The `returns` collection is no longer activated on the Product Sales and Supplier report routes; it now loads only on `/returns` and `/suppliers/*`. The `orders` collection was already route-scoped and stays off every report route except the Settlement report. The `products` and `purchase_orders` collections still sync on every app route (the notification board and the report filter bar need them), so that transfer is unchanged by this work.
 - Report courier options come from a small revision-cached query, so report filter bars no longer need the full Orders context just to populate the courier selector.
 
 ## Verification already run
 
 - `npx tsc --noEmit` passes after the latest changes.
+- `npm run build` passes.
+- `npm run test:reports` passes (43 focused report tests).
+- Targeted ESLint for the report files passes (one pre-existing `react-hooks/set-state-in-effect` error remains in `src/lib/notifications/store.tsx`, untouched by this work).
 - `git diff --check` passes.
-- No tests were run.
+- **Database migration applied** with `npm run db:setup` (never `db:reset`): the three missing tables (`app_ad_spend`, `app_report_daily_summary`, `app_sync_failures`), the `app_sync_failures` columns and all 13 new indexes now exist. Every `app_records` collection count and both users were identical before and after, and the Phase 1/2/3/4/5 report queries were smoke-tested against the live data.
 
 ## Still incomplete
 
 1. The Orders screen and Settlement report still activate the full `orders` collection because their current mutations depend on the complete client store. The Orders API pagination therefore does not yet eliminate the full sync on those routes.
-2. Purchase/supplier and inventory-stock reports still read full source collections; product-sales and inventory valuation still need the product catalog client-side. Move those remaining reads to filtered or aggregated endpoints while preserving permissions, date rules, totals, and exports.
-3. Dashboard cache avoids repeated source reads while revisions are unchanged, but the first read after a write still loads source rows. Replace those scans with SQL aggregates/narrow reads without changing lifetime customer/category semantics.
-4. Review all route-scoped store transitions and validate actual sync, courier fallback, notification snapshots, and accounting behavior before considering the work complete.
+2. The dashboard cache avoids repeated source reads while revisions are unchanged, but the first read after a write still loads source rows. Replace those scans with SQL aggregates/narrow reads without changing lifetime customer/category semantics.
+3. Review all route-scoped store transitions and validate actual sync, courier fallback, notification snapshots, and accounting behavior before considering the work complete.
+
+## Migration status (report redesign)
+
+| Report | Read source |
+| --- | --- |
+| Owner Dashboard, Sales by Channel, Sync Health | Server (`/api/reports/daily-summary`, `/api/reports/sync-health`) |
+| Sales & COD, Courier Cost & Profit/Loss | Server (`/api/reports/sales-cod`, `/api/reports/courier`) |
+| Order Status, Product Sales | Server (`/api/reports/order-status`, `/api/reports/product-sales`) |
+| Purchase, Supplier | Server (`/api/reports/purchases`, `/api/reports/suppliers`) |
+| Inventory Stock, Inventory Valuation | Server (`/api/reports/inventory-stock`, `/api/reports/inventory-valuation`) |
+| Returns, Warranty | Server candidates (`/api/reports/returns`, `/api/reports/warranties`), browser-local date filter |
+| Settlement Report | Client-side (transactional ledger screen that writes payouts) |
 
 ## Important constraints
 

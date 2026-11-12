@@ -2,37 +2,18 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useProducts } from "@/lib/products/store";
-import { useNotifications } from "@/lib/notifications/store";
-import { levelUpperBound, STATUS_LABELS } from "@/lib/notifications/engine";
-import { matchesProductFilters, productMeta } from "@/lib/reports/orders";
+import { STATUS_LABELS } from "@/lib/notifications/engine";
 import { num } from "@/lib/reports/format";
 import type { DateTypeKey } from "@/lib/reports/dates";
 import { useReportFilters } from "@/lib/reports/use-filters";
+import { useInventoryStockReport } from "@/lib/reports/use-report";
+import type { InventoryStockRow } from "@/lib/reports/types";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { InventoryStatusBadge } from "@/components/notifications/badges";
-import type { InventoryStatus } from "@/lib/notifications/types";
 
 type StockLabel = "In Stock" | "Low Stock" | "Out of Stock";
-
-interface StockRow {
-  variantId: string;
-  productId: string;
-  product: string;
-  variant: string;
-  sku: string;
-  category: string;
-  brand: string;
-  active: boolean;
-  available: number;
-  reserved: number;
-  onHand: number;
-  reorder: number;
-  label: StockLabel;
-  alert: InventoryStatus | null;
-}
 
 const LABEL_COLOR: Record<StockLabel, { color: string; bg: string }> = {
   "In Stock": { color: "var(--green)", bg: "var(--green-soft)" },
@@ -45,48 +26,24 @@ const DATE_TYPES: DateTypeKey[] = ["order_created"];
 export default function InventoryStockReportPage() {
   const state = useReportFilters("order_created");
   const f = state.applied;
-  const { products, hydrated } = useProducts();
-  const { board, settings, hydrated: notifReady } = useNotifications();
+  const { data, loading, error } = useInventoryStockReport({
+    category: f.category,
+    brand: f.brand,
+    productId: f.productId,
+    sku: f.sku,
+  });
   const [stockFilter, setStockFilter] = useState<StockLabel | "all">("all");
 
-  const lowBand = levelUpperBound("monitor", settings);
-
-  const all = useMemo<StockRow[]>(() => {
-    const meta = productMeta(products);
-    const alertOf = new Map(board.map((b) => [b.variantId, b.status]));
-    const out: StockRow[] = [];
-    for (const p of products) {
-      for (const v of p.variants) {
-        if (!matchesProductFilters({ productId: p.id, sku: v.sku }, f, meta)) continue;
-        const available = Math.max(0, v.stock - (v.reserved ?? 0));
-        out.push({
-          variantId: v.id,
-          productId: p.id,
-          product: p.name,
-          variant: `${v.color} / ${v.size}`,
-          sku: v.sku,
-          category: p.category,
-          brand: p.brand,
-          active: p.status === "active" && v.status === "active",
-          available,
-          reserved: v.reserved ?? 0,
-          onHand: v.stock,
-          reorder: settings.reorderPoint,
-          label: available <= 0 ? "Out of Stock" : available <= lowBand ? "Low Stock" : "In Stock",
-          alert: alertOf.get(v.id) ?? null,
-        });
-      }
-    }
-    return out.sort((a, b) => a.available - b.available || a.product.localeCompare(b.product));
-  }, [products, board, settings, lowBand, f]);
+  const all = useMemo(() => data?.rows ?? [], [data]);
+  const kpis = data?.kpis;
+  const lowBand = data?.lowBand ?? 0;
 
   const rows = useMemo(() => all.filter((r) => stockFilter === "all" || r.label === stockFilter), [all, stockFilter]);
 
-  if (!hydrated || !notifReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  if (error) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>;
+  if (loading || !kpis) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
 
-  const count = (l: StockLabel) => all.filter((r) => r.label === l).length;
-
-  const columns: Column<StockRow>[] = [
+  const columns: Column<InventoryStockRow>[] = [
     {
       key: "product",
       header: "Product",
@@ -113,7 +70,13 @@ export default function InventoryStockReportPage() {
       ),
     },
     { key: "onhand", header: "On Hand", align: "right", hidden: true, value: (r) => r.onHand },
-    { key: "alert", header: "Alert Status", hidden: true, value: (r) => (r.alert ? STATUS_LABELS[r.alert] : "—"), cell: (r) => (r.alert ? <InventoryStatusBadge status={r.alert} /> : "—") },
+    {
+      key: "alert",
+      header: "Alert Status",
+      hidden: true,
+      value: (r) => (r.alert ? STATUS_LABELS[r.alert] : "—"),
+      cell: (r) => (r.alert ? <InventoryStatusBadge status={r.alert} /> : "—"),
+    },
     { key: "category", header: "Category", hidden: true, value: (r) => r.category },
     { key: "brand", header: "Brand", hidden: true, value: (r) => r.brand },
     { key: "active", header: "Active", hidden: true, value: (r) => (r.active ? "Yes" : "No") },
@@ -146,10 +109,10 @@ export default function InventoryStockReportPage() {
 
       <KpiGrid
         items={[
-          { label: "Total variants", value: num(all.length) },
-          { label: "In stock", value: num(count("In Stock")), tone: "good" },
-          { label: "Low stock", value: num(count("Low Stock")), tone: "warn" },
-          { label: "Out of stock", value: num(count("Out of Stock")), tone: count("Out of Stock") ? "bad" : "neutral" },
+          { label: "Total variants", value: num(kpis.totalVariants) },
+          { label: "In stock", value: num(kpis.inStock), tone: "good" },
+          { label: "Low stock", value: num(kpis.lowStock), tone: "warn" },
+          { label: "Out of stock", value: num(kpis.outOfStock), tone: kpis.outOfStock ? "bad" : "neutral" },
         ]}
       />
 

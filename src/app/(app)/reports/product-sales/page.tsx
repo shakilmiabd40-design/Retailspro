@@ -1,87 +1,42 @@
 "use client";
 
 import { useMemo } from "react";
-import { useProducts } from "@/lib/products/store";
-import { filterOrders, matchesProductFilters, productMeta } from "@/lib/reports/orders";
-import { inRange, type DateTypeKey } from "@/lib/reports/dates";
+import { PRODUCT_SALES_DATE_TYPES } from "@/lib/reports/orders";
 import { num, sum, taka } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
+import { useProductSalesReport } from "@/lib/reports/use-report";
+import type { ProductSalesReportRow } from "@/lib/reports/types";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, Panel, ReportHeader, RuleNote } from "@/components/reports/kpi";
 import { RankBars } from "@/components/reports/charts";
-import { useReportOrders } from "@/lib/reports/use-orders";
-import { useReportReturns } from "@/lib/reports/use-returns";
-
-const DATE_TYPES: DateTypeKey[] = ["delivered", "order_created", "final_status"];
-
-interface VariantSales {
-  variantId: string;
-  productId: string;
-  product: string;
-  variant: string;
-  sku: string;
-  category: string;
-  brand: string;
-  qty: number;
-  revenue: number;
-  returned: number;
-}
 
 export default function ProductSalesReportPage() {
   const state = useReportFilters("delivered");
   const f = state.applied;
-  const { orders, loading: ordersLoading, error: ordersError } = useReportOrders(f.from, f.to, f.dateType);
-  const { products, hydrated: productsReady } = useProducts();
-  const { returns, loading: returnsLoading, error: returnsError } = useReportReturns(f.from, f.to, "customer");
+  const { data, loading, error } = useProductSalesReport({
+    from: f.from,
+    to: f.to,
+    dateType: f.dateType,
+    category: f.category,
+    brand: f.brand,
+    productId: f.productId,
+    sku: f.sku,
+  });
 
-  const rows = useMemo<VariantSales[]>(() => {
-    const meta = productMeta(products);
-    const map = new Map<string, VariantSales>();
-    const get = (item: { variantId: string; productId: string; productName: string; color: string; size: string; sku: string }) => {
-      let row = map.get(item.variantId);
-      if (!row) {
-        const m = meta.get(item.productId);
-        row = { variantId: item.variantId, productId: item.productId, product: item.productName, variant: `${item.color} / ${item.size}`, sku: item.sku, category: m?.category ?? "—", brand: m?.brand ?? "—", qty: 0, revenue: 0, returned: 0 };
-        map.set(item.variantId, row);
-      }
-      return row;
-    };
-
-    for (const o of filterOrders(orders, f, { statuses: ["delivered"] })) {
-      for (const i of o.items) {
-        if (!matchesProductFilters(i, f, meta)) continue;
-        const row = get(i);
-        row.qty += i.qty;
-        row.revenue += i.price * i.qty - i.discount;
-      }
-    }
-
-    // Customer returns that physically came back inside the same period.
-    for (const r of returns) {
-      if (r.type !== "customer" || !r.returnReceived || !inRange(r.returnReceivedAt ? new Date(r.returnReceivedAt) : null, f.from, f.to)) continue;
-      for (const i of r.items) {
-        if (!matchesProductFilters(i, f, meta)) continue;
-        get(i).returned += i.qty;
-      }
-    }
-    return [...map.values()].filter((r) => r.qty > 0 || r.returned > 0).sort((a, b) => b.qty - a.qty);
-  }, [orders, products, returns, f]);
+  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const kpis = data?.kpis;
 
   const topProducts = useMemo(() => {
     const m = new Map<string, { label: string; value: number }>();
-    for (const r of rows) m.set(r.productId, { label: r.product, value: (m.get(r.productId)?.value ?? 0) + r.revenue });
+    for (const row of rows) m.set(row.productId, { label: row.product, value: (m.get(row.productId)?.value ?? 0) + row.revenue });
     return [...m.values()].sort((a, b) => b.value - a.value).slice(0, 6);
   }, [rows]);
 
-  if (ordersLoading || returnsLoading || !productsReady) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
-  if (ordersError || returnsError) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{ordersError || returnsError}</p>;
+  if (error) return <p className="rounded-xl border px-4 py-3 text-[13px]" role="alert" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</p>;
+  if (loading || !kpis) return <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>Loading…</p>;
 
-  const qty = sum(rows, (r) => r.qty);
-  const revenue = sum(rows, (r) => r.revenue);
-  const returned = sum(rows, (r) => r.returned);
-
-  const columns: Column<VariantSales>[] = [
+  const columns: Column<ProductSalesReportRow>[] = [
     { key: "product", header: "Product", value: (r) => r.product, total: () => "Total" },
     { key: "variant", header: "Variant (color/size)", value: (r) => r.variant },
     { key: "sku", header: "SKU", value: (r) => r.sku },
@@ -97,15 +52,15 @@ export default function ProductSalesReportPage() {
   return (
     <div className="space-y-5 pb-10">
       <ReportHeader title="Product Sales Report" description="What sold, by product and by shoe variant." meta={`${f.from} to ${f.to}`} />
-      <FilterBar state={state} dateTypes={DATE_TYPES} product />
-      <RuleNote>Only Delivered orders count as sold. Return Qty is customer returns received in the same period; Net Sold Qty = sold − returned.</RuleNote>
+      <FilterBar state={state} dateTypes={PRODUCT_SALES_DATE_TYPES} product />
+      <RuleNote>Only Delivered orders count as sold. Return Qty is customer returns received in the same period; Net Sold Qty = sold − returned. Report days use the Asia/Dhaka business day.</RuleNote>
 
       <KpiGrid
         items={[
-          { label: "Total qty sold", value: num(qty), tone: "brand" },
-          { label: "Total revenue", value: taka(revenue), tone: "good" },
-          { label: "Return qty", value: num(returned), tone: returned ? "warn" : "neutral" },
-          { label: "Net sold qty", value: num(qty - returned) },
+          { label: "Total qty sold", value: num(kpis.qty), tone: "brand" },
+          { label: "Total revenue", value: taka(kpis.revenue), tone: "good" },
+          { label: "Return qty", value: num(kpis.returned), tone: kpis.returned ? "warn" : "neutral" },
+          { label: "Net sold qty", value: num(kpis.net) },
         ]}
       />
 

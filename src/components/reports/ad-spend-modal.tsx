@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { api } from "@/lib/persist/api";
 import { useToast } from "@/components/toast";
-import type { AdSpendEntry, AdSpendInput } from "@/lib/marketing/types";
+import type { AdPlatform, AdSpendEntry, AdSpendInput } from "@/lib/marketing/types";
+
+const PLATFORMS = ["meta", "facebook", "instagram", "google", "tiktok", "other"] as const;
+const isPlatform = (value: string): value is AdPlatform => (PLATFORMS as readonly string[]).includes(value);
 
 export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: () => void }) {
   const showToast = useToast();
@@ -15,13 +18,13 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
   // Form state
   const today = new Date().toISOString().slice(0, 10);
   const [spendDate, setSpendDate] = useState(today);
-  const [platform, setPlatform] = useState<"meta" | "facebook" | "instagram" | "google" | "tiktok" | "other">("meta");
+  const [platform, setPlatform] = useState<AdPlatform>("meta");
   const [campaignName, setCampaignName] = useState("");
   const [adSetName, setAdSetName] = useState("");
   const [adName, setAdName] = useState("");
   const [spend, setSpend] = useState("");
 
-  const loadEntries = async () => {
+  const loadEntries = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api<{ entries: AdSpendEntry[] }>("GET", "/api/marketing/ad-spend");
@@ -31,11 +34,15 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (open) void loadEntries();
-  }, [open]);
+    if (open) {
+      startTransition(() => {
+        void loadEntries();
+      });
+    }
+  }, [open, loadEntries]);
 
   if (!open) return null;
 
@@ -69,8 +76,8 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
       setAdName("");
       void loadEntries();
       onSaved?.();
-    } catch (err: any) {
-      showToast(err?.message || "Failed to save ad spend", "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save ad spend", "error");
     } finally {
       setSubmitting(false);
     }
@@ -115,7 +122,7 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
             if (/^\d{4}-\d{2}-\d{2}$/.test(rowDate) && rowCampaign && rowSpend > 0) {
               entriesToSave.push({
                 spendDate: rowDate,
-                platform: (["meta", "facebook", "instagram", "google", "tiktok"].includes(rowPlatform) ? rowPlatform : "meta") as any,
+                platform: isPlatform(rowPlatform) ? rowPlatform : "meta",
                 campaignName: rowCampaign,
                 adSetName: rowAdSet || undefined,
                 adName: rowAd || undefined,
@@ -134,8 +141,8 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
         showToast(`Imported ${entriesToSave.length} ad spend rows!`);
         void loadEntries();
         onSaved?.();
-      } catch (err: any) {
-        showToast(err?.message || "Failed to parse CSV", "error");
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "Failed to parse CSV", "error");
       }
     };
     reader.readAsText(file);
@@ -171,7 +178,14 @@ export function AdSpendModal({ open, onClose, onSaved }: { open: boolean; onClos
               <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--text-muted)" }}>
                 Platform
               </label>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value as any)} className={inputClass} style={inputStyle}>
+              <select
+                value={platform}
+                onChange={(e) => {
+                  if (isPlatform(e.target.value)) setPlatform(e.target.value);
+                }}
+                className={inputClass}
+                style={inputStyle}
+              >
                 <option value="meta">Meta (FB + IG)</option>
                 <option value="facebook">Facebook</option>
                 <option value="instagram">Instagram</option>

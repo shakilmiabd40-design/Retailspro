@@ -1,10 +1,18 @@
 import type { Order, OrderStatus } from "@/lib/orders/types";
 import { ORDER_STATUS_LABELS } from "@/lib/orders/utils";
-import type { Product } from "@/lib/products/types";
-import { inRange, parseDate, type DateTypeKey, type ReportFilters } from "./dates";
+import { parseDate, type DateTypeKey, type ReportFilters } from "./dates";
 
 export const ALL_ORDER_STATUSES: OrderStatus[] = ["pending", "processing", "in_transit", "delivered", "partial_delivered", "refuse_return", "cancelled"];
 export const COURIER_RESULT_STATUSES: OrderStatus[] = ["delivered", "partial_delivered", "refuse_return"];
+
+/** Date types offered by the server-backed Sales & COD report. */
+export const SALES_COD_DATE_TYPES: DateTypeKey[] = ["delivered", "order_created", "dispatch", "final_status"];
+/** Date types offered by the server-backed Courier Cost & Profit/Loss report. */
+export const COURIER_REPORT_DATE_TYPES: DateTypeKey[] = ["final_status", "delivered", "dispatch", "order_created"];
+/** Date types offered by the server-backed Order Status report. */
+export const ORDER_STATUS_DATE_TYPES: DateTypeKey[] = ["order_created", "dispatch", "final_status"];
+/** Date types offered by the server-backed Product Sales report. */
+export const PRODUCT_SALES_DATE_TYPES: DateTypeKey[] = ["delivered", "order_created", "final_status"];
 
 // ---- per-order dates ----------------------------------------------------------
 
@@ -74,31 +82,14 @@ export function orderDateFor(o: Order, type: DateTypeKey): Date | null {
   }
 }
 
-// ---- filtering ------------------------------------------------------------------
-
-export function filterOrders(orders: Order[], f: ReportFilters, opts: { statuses?: OrderStatus[]; dateType?: DateTypeKey } = {}): Order[] {
-  const type = opts.dateType ?? f.dateType;
-  return orders.filter((o) => {
-    if (opts.statuses && !opts.statuses.includes(o.status)) return false;
-    if (f.status !== "all" && o.status !== f.status) return false;
-    if (f.courier !== "all" && o.courier.company !== f.courier) return false;
-    return inRange(orderDateFor(o, type), f.from, f.to);
-  });
-}
-
-export function uniqueCouriers(orders: Order[]): string[] {
-  return [...new Set(orders.map((o) => o.courier.company.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-
 // ---- product filters (category / brand / product / SKU) -----------------------------
 
 export type ProductMeta = Map<string, { category: string; brand: string }>;
 
-export function productMeta(products: Product[]): ProductMeta {
-  return new Map(products.map((p) => [p.id, { category: p.category, brand: p.brand }]));
-}
+/** The subset of `ReportFilters` that category/brand/product/SKU matching needs. */
+export type ProductFilterFields = Pick<ReportFilters, "category" | "brand" | "productId" | "sku">;
 
-export function matchesProductFilters(item: { productId: string; sku: string }, f: ReportFilters, meta: ProductMeta): boolean {
+export function matchesProductFilters(item: { productId: string; sku: string }, f: ProductFilterFields, meta: ProductMeta): boolean {
   const m = meta.get(item.productId);
   if (f.category !== "all" && m?.category !== f.category) return false;
   if (f.brand !== "all" && m?.brand !== f.brand) return false;
@@ -106,8 +97,4 @@ export function matchesProductFilters(item: { productId: string; sku: string }, 
   const q = f.sku.trim().toLowerCase();
   if (q && !item.sku.toLowerCase().includes(q)) return false;
   return true;
-}
-
-export function hasProductFilter(f: ReportFilters): boolean {
-  return f.category !== "all" || f.brand !== "all" || f.productId !== "all" || !!f.sku.trim();
 }

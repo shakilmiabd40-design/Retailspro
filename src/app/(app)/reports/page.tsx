@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -38,7 +38,7 @@ interface DailySummaryApiResponse {
 }
 
 export default function OwnerDashboardPage() {
-  const [preset, setPreset] = useState<PresetKey>("this_month");
+  const [preset, setPreset] = useState<PresetKey | "custom">("this_month");
   const [dateRange, setDateRange] = useState(() => presetRange("this_month"));
   const [channelFilter, setChannelFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export default function OwnerDashboardPage() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api<DailySummaryApiResponse>(
@@ -67,13 +67,13 @@ export default function OwnerDashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange.from, dateRange.to, channelFilter]);
 
   useEffect(() => {
     startTransition(() => {
       void loadData();
     });
-  }, [dateRange.from, dateRange.to, channelFilter]);
+  }, [loadData]);
 
   const k = data?.kpis;
   const canSeeCost = data?.canSeeCostAndProfit ?? false;
@@ -189,7 +189,7 @@ export default function OwnerDashboardPage() {
             type="date"
             value={dateRange.from}
             onChange={(e) => {
-              setPreset("custom" as any);
+              setPreset("custom");
               setDateRange((prev) => ({ ...prev, from: e.target.value }));
             }}
             className="rounded-lg border px-2 py-1 text-[12px]"
@@ -200,7 +200,7 @@ export default function OwnerDashboardPage() {
             type="date"
             value={dateRange.to}
             onChange={(e) => {
-              setPreset("custom" as any);
+              setPreset("custom");
               setDateRange((prev) => ({ ...prev, to: e.target.value }));
             }}
             className="rounded-lg border px-2 py-1 text-[12px]"
@@ -429,7 +429,7 @@ export default function OwnerDashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `৳${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
-                    <Tooltip formatter={(v: any) => [`৳${Number(v).toLocaleString()}`, ""]} />
+                    <Tooltip formatter={(v) => [`৳${Number(v).toLocaleString()}`, ""]} />
                     <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "8px" }} />
                     <Line type="monotone" dataKey="netRevenue" name="Net Realized Revenue" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
                     {canSeeCost && <Line type="monotone" dataKey="netProfit" name="Net Profit" stroke="#10b981" strokeWidth={2} dot={false} />}

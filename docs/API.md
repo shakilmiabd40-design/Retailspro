@@ -439,3 +439,6 @@ export const cancelOrder = (ref: string, reason: string) => rp<{ data: any }>(`/
 ## 8. Changelog
 
 * **2026-09-01** — first release: products, orders, cancel, webhooks (`order.*`, `stock.updated`, `product.*`).
+* **2026-11-09** — failed `POST /orders` ingestion is recorded in the dashboard's Sync Health queue with the calling
+  API key. A staff retry reuses that key identity, so the created order keeps its channel and remains idempotent by
+  `external_id`. Validation errors still require a corrected request; retry is for transient failures.

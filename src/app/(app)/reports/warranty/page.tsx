@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/persist/api";
 import { daysLeft, effectiveStatus, WARRANTY_STATUS_LABELS } from "@/lib/warranty/utils";
 import type { Warranty, WarrantyClaim } from "@/lib/warranty/types";
 import { formatDay, inRange, parseDate, type DateTypeKey } from "@/lib/reports/dates";
 import { num, ymd } from "@/lib/reports/format";
 import { useReportFilters } from "@/lib/reports/use-filters";
+import { useWarrantyReport } from "@/lib/reports/use-report";
 import { FilterBar } from "@/components/reports/filter-bar";
 import { DataTable, type Column } from "@/components/reports/data-table";
 import { KpiGrid, ReportHeader, RuleNote } from "@/components/reports/kpi";
@@ -25,20 +25,11 @@ const APPROVED = ["approved", "in_service", "replaced", "refunded"];
 export default function WarrantyReportPage() {
   const state = useReportFilters("warranty_start");
   const f = state.applied;
-  const [warranties, setWarranties] = useState<Warranty[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<Tab>("active");
+  const { data, loading, error } = useWarrantyReport({ from: f.from, to: f.to, dateType: f.dateType });
+  const loadError = error;
 
-  useEffect(() => {
-    let current = true;
-    setLoading(true);
-    api<{ warranties: Warranty[] }>("GET", `/api/reports/warranties?from=${encodeURIComponent(f.from)}&to=${encodeURIComponent(f.to)}&dateType=${f.dateType}`)
-      .then((result) => { if (current) { setWarranties(result.warranties); setLoadError(""); } })
-      .catch((error) => { if (current) setLoadError(error instanceof Error ? error.message : "Could not load the warranty report."); })
-      .finally(() => { if (current) setLoading(false); });
-    return () => { current = false; };
-  }, [f.from, f.to, f.dateType]);
+  const warranties = useMemo(() => data?.warranties ?? [], [data]);
 
   const claimInRange = (c: WarrantyClaim) => inRange(new Date(c.submittedAt), f.from, f.to);
 

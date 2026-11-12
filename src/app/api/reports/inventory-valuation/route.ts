@@ -1,55 +1,43 @@
 import { requireAuth } from "@/server/auth";
 import { canRead, COLLECTION_ACCESS } from "@/server/collections";
-import { query } from "@/server/db";
 import { ApiError, json, route } from "@/server/http";
-import { RevisionCache, revisionKey } from "@/server/revision-cache";
+import { canSeeProductCost } from "@/server/redact";
+import { dhakaDay } from "@/server/reports/business-day";
+import { buildInventoryValueReport } from "@/server/reports/inventory";
+import { loadLastSoldDays, loadStockProducts } from "@/server/reports/inventory-data";
 
 export const dynamic = "force-dynamic";
-type LastSoldLine = { variantId: string; date: string };
-const salesCache = new RevisionCache<LastSoldLine[]>(4);
+
+const TEXT_LIMIT = 120;
 
 export const GET = route(async (req) => {
   const auth = await requireAuth(req, { passive: true });
+  if (!canRead(auth.role, COLLECTION_ACCESS.products)) throw new ApiError(403, "forbidden", "You do not have access to the product catalog.");
   if (!canRead(auth.role, COLLECTION_ACCESS.orders)) throw new ApiError(403, "forbidden", "You do not have access to order data for this report.");
-  const timeZone = req.nextUrl.searchParams.get("timeZone") || "UTC";
-  try { new Intl.DateTimeFormat("en", { timeZone }).format(0); }
-  catch { throw new ApiError(400, "invalid_timezone", "Choose a valid time zone."); }
-  const revision = await revisionKey(["orders"]);
-  const sales = await salesCache.get(`${revision}|${timeZone}`, async () => {
-    const { rows } = await query<LastSoldLine>(
-      `with delivered as (
-         select i->>'variantId' as variant_id,
-           coalesce(
-             nullif(data #>> '{delivery,deliveryDate}',''),
-             (select a.value->>'at'
-                from jsonb_array_elements(coalesce(data->'activity','[]'::jsonb)) with ordinality as a(value, ord)
-               where a.value->>'label'='Marked Delivered'
-               order by a.ord desc limit 1),
-             (select a.value->>'at'
-                from jsonb_array_elements(coalesce(data->'activity','[]'::jsonb)) with ordinality as a(value, ord)
-               where a.value->>'label'='Edited by Super Admin'
-                 and coalesce(a.value->>'detail','') like '%→ Delivered%'
-               order by a.ord desc limit 1),
-             data->>'updatedAt'
-           ) as sold_at
-         from app_records
-         cross join lateral jsonb_array_elements(coalesce(data->'items','[]'::jsonb)) i
-         where collection='orders' and data->>'status'='delivered' and i->>'variantId' is not null
-       ), normalized as (
-         select variant_id,
-           case
-             when sold_at ~ '^\\d{4}-\\d{2}-\\d{2}$' then (sold_at::date::timestamp at time zone $1)
-             when sold_at ~ '^\\d{4}-\\d{2}-\\d{2}T' then sold_at::timestamptz
-             else null
-           end as sold_at
-         from delivered
-       )
-       select variant_id as "variantId",
-         to_char(max(sold_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as date
-       from normalized where sold_at is not null group by variant_id`,
-      [timeZone],
-    );
-    return rows.filter((row) => !!row.variantId && !!row.date);
+
+  const sp = req.nextUrl.searchParams;
+  const category = (sp.get("category") ?? "all").slice(0, TEXT_LIMIT);
+  const brand = (sp.get("brand") ?? "all").slice(0, TEXT_LIMIT);
+  const productId = (sp.get("productId") ?? "all").slice(0, TEXT_LIMIT);
+  const sku = (sp.get("sku") ?? "").slice(0, TEXT_LIMIT);
+  const deadDays = Math.min(3650, Math.max(1, Number(sp.get("deadDays") ?? 60) || 60));
+
+  // Unit cost and stock value are cost prices: only roles with the products "financial"
+  // permission may see them.
+  const seesCost = canSeeProductCost(auth.role);
+  const [products, lastSoldDays] = await Promise.all([loadStockProducts(seesCost), loadLastSoldDays()]);
+
+  const today = dhakaDay(new Date()) ?? "";
+  const report = buildInventoryValueReport(products, {
+    category,
+    brand,
+    productId,
+    sku,
+    lastSoldDays,
+    today,
+    deadDays,
+    seesCost,
   });
-  return json({ sales });
+
+  return json({ ...report, canSeeCost: seesCost });
 });

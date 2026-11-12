@@ -2,11 +2,12 @@ import { requireAuth, roleHas } from "@/server/auth";
 import { query } from "@/server/db";
 import { ApiError, json, readJson, route } from "@/server/http";
 import { writeAudit } from "@/server/audit";
-import type { AdSpendEntry, AdSpendInput } from "@/lib/marketing/types";
+import type { AdPlatform, AdSpendEntry, AdSpendInput } from "@/lib/marketing/types";
 
 export const dynamic = "force-dynamic";
 
 const PLATFORMS = ["meta", "facebook", "instagram", "google", "tiktok", "other"] as const;
+const isPlatform = (value: string): value is AdPlatform => (PLATFORMS as readonly string[]).includes(value);
 
 export const GET = route(async (req) => {
   const auth = await requireAuth(req, { passive: true });
@@ -60,7 +61,7 @@ export const GET = route(async (req) => {
   const entries: AdSpendEntry[] = rows.map((r) => ({
     id: r.id,
     spendDate: r.spend_date,
-    platform: r.platform as any,
+    platform: isPlatform(r.platform) ? r.platform : "meta",
     campaignId: r.campaign_id,
     campaignName: r.campaign_name,
     adSetName: r.ad_set_name,
@@ -89,7 +90,7 @@ export const POST = route(async (req) => {
       throw new ApiError(422, "invalid_field", "spendDate must be YYYY-MM-DD.");
     }
     const platform = (item.platform || "meta").toLowerCase();
-    if (!PLATFORMS.includes(platform as any)) {
+    if (!isPlatform(platform)) {
       throw new ApiError(422, "invalid_field", `platform must be one of: ${PLATFORMS.join(", ")}`);
     }
     const campaignName = (item.campaignName || "").trim();
@@ -130,7 +131,7 @@ export const POST = route(async (req) => {
     saved.push({
       id: r.id,
       spendDate: r.spend_date,
-      platform: r.platform as any,
+      platform: isPlatform(r.platform) ? r.platform : "meta",
       campaignId: r.campaign_id,
       campaignName: r.campaign_name,
       adSetName: r.ad_set_name,
