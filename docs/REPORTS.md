@@ -64,6 +64,8 @@ Per order (computed, in `src/lib/settlements/compute.ts`):
 
 Orders that were marked "settled" on the order itself before the ledger existed count as Settled (marked with `*`) until a payout is recorded against them. The order's own Settled/Pending flag (used by the Orders list filter) is kept in step with the ledger. New deliveries now default to **Pending** in the status dialog, since payouts arrive later.
 
+A Partial Delivered order the courier owes nothing for (the customer paid less than the courier's charges) has an Expected of ৳0 and is not tracked at all — the Orders list shows it as **Nothing due**, and **Mark as Settled** closes it on the order itself instead of recording a payout. Marking such an order settled by hand (Edit Order → Settlement Status) also counts as Settled, with or without an expected amount. A Partial Delivered order is never settled for its full COD: only what the customer actually paid is ever recorded as received.
+
 With **Settlement Paid Date**, only orders that received a payout in the period appear. Use **Delivered Date** to see unsettled orders.
 
 ## Purchases and suppliers

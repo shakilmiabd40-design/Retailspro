@@ -86,7 +86,9 @@ export function UpdateStatusModal({
     setCustomerPaid(expectedCod(order));
     setForwardCharge(order.courier.forwardCost || 0);
     setDeliveryDate(today);
-    setSettlementStatus("settled");
+    // New deliveries default to Pending: the courier pays out later, so the order is not settled
+    // until a payout is recorded (or someone settles it on purpose).
+    setSettlementStatus("pending");
     setReturnCost(0);
     setOtherCost(0);
     setReason("");

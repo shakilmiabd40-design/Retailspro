@@ -42,6 +42,19 @@ export function policyExpected(order: Order): number {
   return Math.max(0, collected - cost - codCharge - riskCharge);
 }
 
+/**
+ * The expected settlement for one order, honouring the settlement mode and an admin override.
+ * Every screen must use this figure — a screen that invents its own expectation (for example by
+ * falling back to the full COD) settles an order for money the customer never paid.
+ */
+export function expectedSettlement(order: Order, overrides: Record<string, SettlementOverride> = {}): number {
+  const mode = runtime.settlementMode;
+  const override = overrides[order.id];
+  if (mode !== "auto" && override?.expected !== undefined) return Math.max(0, override.expected);
+  if (mode === "manual") return 0;
+  return policyExpected(order);
+}
+
 export interface SettlementRow {
   order: Order;
   applies: boolean;
@@ -64,17 +77,21 @@ export function computeSettlement(order: Order, index: AllocationIndex, override
   const override = overrides[order.id];
   const overridden = mode !== "auto" && override?.expected !== undefined;
   const policy = policyExpected(order);
-  const expected = overridden ? Math.max(0, override!.expected!) : mode === "manual" ? 0 : policy;
+  const expected = expectedSettlement(order, overrides);
   const allocations = index.get(order.id) ?? [];
   let received = allocations.reduce((s, a) => s + a.amount, 0);
 
   const statusAllowsPayout = order.status === "delivered" || order.status === "partial_delivered" || (order.status === "refuse_return" && overridden && expected > 0);
-  const legacy = statusAllowsPayout && allocations.length === 0 && order.delivery.settlementStatus === "settled" && expected > 0;
+  // Marked settled on the order itself → counts as Settled until a payout is recorded against it.
+  // This must NOT depend on the expected amount: a Partial Delivered order the courier owes nothing
+  // for (the customer paid less than the courier's charges) still has to be settleable, otherwise
+  // "mark as settled" is accepted on the order and then silently ignored by the report.
+  const legacy = statusAllowsPayout && allocations.length === 0 && order.delivery.settlementStatus === "settled";
   if (legacy) received = expected;
 
   // Nothing expected and nothing received → not part of settlement tracking.
-  const applies = statusAllowsPayout && (mode === "manual" || expected > 0 || received > 0);
-  const status: SettlementLabel = received >= expected && received > 0 ? "Settled" : received > 0 ? "Partially Settled" : "Unsettled";
+  const applies = statusAllowsPayout && (mode === "manual" || expected > 0 || received > 0 || legacy);
+  const status: SettlementLabel = legacy ? "Settled" : received >= expected && received > 0 ? "Settled" : received > 0 ? "Partially Settled" : "Unsettled";
   const lastPaidAt = allocations.length ? allocations.map((a) => a.paidDate).sort().at(-1) : undefined;
 
   return {

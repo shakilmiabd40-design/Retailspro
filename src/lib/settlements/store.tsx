@@ -28,6 +28,11 @@ interface SettlementsContextValue {
   recordPayout: (input: NewPayoutInput) => { ok: true; payout: CourierPayout } | { ok: false; error: string };
   deletePayout: (id: string) => void;
   setOverride: (orderId: string, override: SettlementOverride | null) => void;
+  /**
+   * Marks orders as settled on the order itself (no ledger entry). Used when the courier owes
+   * nothing for them, so the order stops sitting there as "Unsettled" with no way to close it.
+   */
+  markSettled: (orderIds: string[]) => void;
 }
 
 const SettlementsContext = createContext<SettlementsContextValue | null>(null);
@@ -105,6 +110,12 @@ export function SettlementsProvider({ children }: { children: ReactNode }) {
         // Only re-derive the order's Settled/Pending flag when payouts are involved;
         // an order settled the old way (no ledger entries) must stay settled after a note or amount tweak.
         if (data.payouts.some((p) => p.allocations.some((a) => a.orderId === orderId))) syncFlags(next, [orderId]);
+      },
+      markSettled: (orderIds) => {
+        if (!orderIds.length) return;
+        const flags: Record<string, "settled" | "pending"> = {};
+        for (const id of orderIds) flags[id] = "settled";
+        setSettlementFlags(flags);
       },
     };
   }, [data, rows, rowsFor, loaded, ordersReady, orders, setSettlementFlags, setData]);
