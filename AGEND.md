@@ -31,15 +31,33 @@ Reduce initial load and large list/report transfer time without changing order, 
 - `npx tsc --noEmit` passes after the latest changes.
 - `npm run build` passes.
 - `npm run test:reports` passes (43 focused report tests).
-- Targeted ESLint for the report files passes (one pre-existing `react-hooks/set-state-in-effect` error remains in `src/lib/notifications/store.tsx`, untouched by this work).
+- `npm run check:dashboard` proves the narrow dashboard/P&L read produces byte-identical output to the
+  previous full-record read, for five date ranges, both cost-visibility modes and three P&L periods.
+- `npm run lint` is clean (the one remaining `react-hooks/set-state-in-effect` error in
+  `src/lib/notifications/store.tsx` was fixed by moving the snapshot reset into React's "adjust state
+  during render" pattern, which keeps the exact behaviour).
 - `git diff --check` passes.
 - **Database migration applied** with `npm run db:setup` (never `db:reset`): the three missing tables (`app_ad_spend`, `app_report_daily_summary`, `app_sync_failures`), the `app_sync_failures` columns and all 13 new indexes now exist. Every `app_records` collection count and both users were identical before and after, and the Phase 1/2/3/4/5 report queries were smoke-tested against the live data.
+- `npm run db:backup` writes a full JSON dump of every `app_*` table to `backups/` (git-ignored). See `docs/BACKUP.md`.
 
 ## Still incomplete
 
-1. The Orders screen and Settlement report still activate the full `orders` collection because their current mutations depend on the complete client store. The Orders API pagination therefore does not yet eliminate the full sync on those routes.
-2. The dashboard cache avoids repeated source reads while revisions are unchanged, but the first read after a write still loads source rows. Replace those scans with SQL aggregates/narrow reads without changing lifetime customer/category semantics.
-3. Review all route-scoped store transitions and validate actual sync, courier fallback, notification snapshots, and accounting behavior before considering the work complete.
+1. The Orders screen and Settlement report still activate the full `orders` collection. This is a
+   direct consequence of the write path, not an oversight: both screens mutate orders in the browser and
+   save through `/api/sync`, which needs the complete record (and its current `version`) to build a
+   correct upsert. Moving them off the collection needs a dedicated transactional endpoint — a different
+   write path — so it is left alone until that is explicitly wanted.
+2. The dashboard and the P&L read the whole `orders` and `products` collections on a cache miss. The
+   read is now narrowed in SQL (`src/server/reports/dashboard-source.ts` drops the activity trail, the
+   customer's address/notes and the product's description/lists, none of which the dashboard or the P&L
+   read), which cut the orders payload by ~58% without changing a number — `npm run check:dashboard`
+   proves the old and new reads produce byte-identical output for every range and both cost modes. What
+   is still open is pushing the aggregation itself into SQL (lifetime customer and category counts still
+   need every order), which must not change those semantics.
+3. The `products` and `purchase_orders` collections still sync on every app route, because the stock
+   board and the report filter bar need them. Narrowing them means giving the stock board a server-side
+   source on non-dashboard routes — a notification-lifecycle change, so it is not done here.
+4. Review all route-scoped store transitions and validate actual sync, courier fallback, notification snapshots, and accounting behavior before considering the work complete.
 
 ## Migration status (report redesign)
 

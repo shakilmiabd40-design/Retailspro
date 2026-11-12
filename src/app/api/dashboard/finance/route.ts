@@ -1,6 +1,5 @@
 import type { Account, LedgerEntry } from "@/lib/accounting/types";
 import { accountBalance, profitLoss, type ProfitLoss } from "@/lib/accounting/utils";
-import type { Order } from "@/lib/orders/types";
 import type { Product } from "@/lib/products/types";
 import type { PosInvoice } from "@/lib/pos/types";
 import { canRead, COLLECTION_ACCESS } from "@/server/collections";
@@ -8,6 +7,7 @@ import { requireAuth } from "@/server/auth";
 import { query } from "@/server/db";
 import { ApiError, json, route } from "@/server/http";
 import { canSeeProductCost, redactProductCost } from "@/server/redact";
+import { loadDashboardOrders, loadDashboardProducts } from "@/server/reports/dashboard-source";
 import { RevisionCache, revisionKey } from "@/server/revision-cache";
 
 export const dynamic = "force-dynamic";
@@ -41,8 +41,8 @@ export const GET = route(async (req) => {
       return rows.map((row) => row.data);
     };
     const [orders, storedProducts, invoices, ledger, accounts] = await Promise.all([
-      load<Order>("orders"),
-      load<Product>("products"),
+      loadDashboardOrders(),
+      loadDashboardProducts(),
       canReadInvoices ? load<PosInvoice>("pos_invoices") : Promise.resolve([]),
       load<LedgerEntry>("ledger"),
       load<Account>("accounts"),

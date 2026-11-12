@@ -9,6 +9,8 @@
     "lint": "eslint",
     "db:setup": "node scripts/setup-db.mjs",
     "db:reset": "node scripts/setup-db.mjs --reset",
+    "db:backup": "node scripts/backup-db.mjs",
+    "check:dashboard": "npx --yes tsx --conditions=react-server scripts/dashboard-diff.check.ts",
     "test:pos": "npx --yes tsx --test src/lib/pos/utils.test.ts",
     "test:accounting": "npx --yes tsx --test src/lib/accounting/utils.test.ts",
     "test:accounting-gl": "npx --yes tsx --test --conditions=react-server src/lib/accounting/fifo.test.ts src/server/accounting/guards.test.ts",

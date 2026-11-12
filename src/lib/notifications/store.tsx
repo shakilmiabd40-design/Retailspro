@@ -90,9 +90,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   });
   const [orderNotificationData, setOrderNotificationData, orderNotificationsLoaded] = useDocument<OrderNotificationsData>("order_notifications", EMPTY_ORDER_NOTIFICATIONS);
   const loaded = dataLoaded && settingsLoaded && orderNotificationsLoaded;
-  const [remoteSnapshots, setRemoteSnapshots] = useState<SkuSnapshot[] | null>(null);
+  // The remote snapshot belongs to one dashboard visit. Leaving the dashboard invalidates it, so a
+  // later visit never resolves or raises alerts from a snapshot that was taken before the last change.
+  const [remote, setRemote] = useState<{ onDashboard: boolean; snapshots: SkuSnapshot[] | null }>({ onDashboard: dashboard, snapshots: null });
+  const [wasDashboard, setWasDashboard] = useState(dashboard);
+  if (wasDashboard !== dashboard) {
+    setWasDashboard(dashboard);
+    setRemote({ onDashboard: dashboard, snapshots: null });
+  }
+  const remoteSnapshots = remote.onDashboard === dashboard ? remote.snapshots : null;
   useEffect(() => {
-    if (!dashboard) { setRemoteSnapshots(null); return; }
+    if (!dashboard) return;
     let current = true;
     let inFlight = false;
     let revision = "";
@@ -108,7 +116,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         // real "nothing is low on stock" snapshot, so treating it as one would resolve every open alert.
         if (result.revision === "forbidden") return;
         revision = result.revision;
-        if (!result.unchanged) setRemoteSnapshots(result.snapshots ?? []);
+        if (!result.unchanged) setRemote((prev) => ({ ...prev, snapshots: result.snapshots ?? [] }));
       } catch { /* Keep the last good snapshot; a transient read failure must not clear alerts. */ }
       finally { inFlight = false; }
     };
