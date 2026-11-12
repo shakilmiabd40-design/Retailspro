@@ -181,6 +181,10 @@ under **Not in the ledger**. `npm run check:profit` prints the gap between the t
 A role without the products *financial* permission (or accounting access) sees the sales side but
 not the cost, the profit or the money behind them — the same rule the Owner Dashboard uses.
 
+The **Accounting → Profit & Loss** screen reads the *same* engine (it passes its own periods), so the
+two screens can never disagree. The Accounting screen keeps its month columns (3 / 6 / 12 months or a
+custom range) and the CSV export.
+
 ### Customising it (the "row definition × column definition" idea)
 
 Like the account schedules in the big ERPs, the report is a **layout**, not a fixed screen:

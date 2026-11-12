@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getProfitLossReport } from "../src/server/reports/profit-loss";
+import { buildPnlPeriods } from "../src/lib/reports/profit-loss";
 import { taka } from "../src/lib/reports/format";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,9 +36,7 @@ const TO = "2026-09-30";
 
 async function main() {
   const report = await getProfitLossReport({
-    from: FROM,
-    to: TO,
-    columns: ["current", "previous"],
+    periods: buildPnlPeriods(FROM, TO, ["current", "previous"]),
     lines: [],
     dimension: "channel",
   });

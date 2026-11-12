@@ -34,6 +34,9 @@ Reduce initial load and large list/report transfer time without changing order, 
 - `npm run check:dashboard` proves the narrow dashboard/P&L read produces byte-identical output to the
   previous full-record read, for five date ranges, both cost-visibility modes and three P&L periods.
 - `npm run check:profit` prints the gap between the Owner Dashboard's profit and the Accounting P&L.
+- The Accounting P&L and the Reports P&L are the same engine now: the Accounting screen passes its own
+  periods, the Reports screen its named columns, and both show the same statement (verified against the
+  live database — all ten lines identical).
 - `npm run check:profit-loss` runs the new Profit & Loss report against the live database and proves the
   statement adds up; it also checks the ad-spend and COD-fee SQL against synthetic rows.
 - `npm run check:query` runs every report-builder dataset with every dimension and measure.

@@ -1,9 +1,7 @@
 import "server-only";
 import {
-  buildPnlPeriods,
   buildPnlStatement,
   PNL_LINE_DEFS,
-  type PnlColumnKey,
   type PnlDimension,
   type PnlLineDef,
   type PnlLineKey,
@@ -24,12 +22,13 @@ import { query } from "@/server/db";
  */
 
 export interface ProfitLossOptions {
-  from: string;
-  to: string;
-  columns: PnlColumnKey[];
-  /** Line keys to show, in order. */
+  /** The periods to report on, in order. Both screens build these themselves. */
+  periods: PnlPeriod[];
+  /** Line keys to show, in order. Empty means every line. */
   lines: PnlLineKey[];
   dimension: PnlDimension;
+  /** The range the breakdown covers. Defaults to the first period. */
+  breakdownRange?: { from: string; to: string };
 }
 
 export interface PnlAccountRow {
@@ -206,12 +205,15 @@ async function loadBreakdown(dimension: PnlDimension, from: string, to: string) 
 }
 
 export async function getProfitLossReport(options: ProfitLossOptions): Promise<ProfitLossReport> {
-  const periods = buildPnlPeriods(options.from, options.to, options.columns);
+  const periods = options.periods;
+  if (!periods.length) throw new Error("A profit and loss report needs at least one period.");
+  const breakdownRange = options.breakdownRange ?? { from: periods[0].from, to: periods[0].to };
+
   const [gl, adSpend, codFees, breakdown] = await Promise.all([
     loadGlTotals(periods),
     loadAdSpend(periods),
     loadCodFees(periods),
-    loadBreakdown(options.dimension, options.from, options.to),
+    loadBreakdown(options.dimension, breakdownRange.from, breakdownRange.to),
   ]);
 
   const totals = gl.totals.map((total, index) => ({
