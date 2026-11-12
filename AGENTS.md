@@ -52,3 +52,13 @@ Before changing a subsystem, read its relevant guide:
 - Run only focused tests for changed business logic when tests are requested. Do not reset or seed a real database as part of routine verification.
 - Review `git diff --check` and the final diff. Do not commit or push unless the user asks.
 - Never run `npm run db:reset` against a configured database without explicit user direction; it drops application data.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
