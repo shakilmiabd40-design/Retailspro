@@ -188,6 +188,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         { label: "Overview", href: "/accounting", icon: LayoutGrid },
         { label: "Trial balance", href: "/accounting/trial-balance", icon: Landmark },
         { label: "Profit & Loss", href: "/accounting/profit-loss", icon: BarChart3 },
+        { label: "Expenses", href: "/accounting/expenses", icon: Receipt },
         { label: "Balance sheet", href: "/accounting/balance-sheet", icon: Building2 },
         { label: "Inventory valuation", href: "/accounting/inventory", icon: Boxes },
         { label: "Journal entries", href: "/accounting/journals", icon: ReceiptText },

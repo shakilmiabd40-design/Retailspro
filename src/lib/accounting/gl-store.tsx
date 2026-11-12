@@ -78,7 +78,9 @@ function nextNumber(prefix: string, existing: JournalEntry[]) {
 
 export function GLProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
-  const journalsPage = pathname === "/accounting/journals";
+  // The journal collection has to be loaded on any screen that writes a journal
+  // entry, otherwise the sync adapter would never see the new entry.
+  const journalsPage = pathname === "/accounting/journals" || pathname === "/accounting/expenses";
   const [coa, setCoa, coaReady] = useCollection<ChartOfAccount>("chart_of_accounts");
   const [journals, setJournals, journalsReady] = useCollection<JournalEntry>("journal_entries", undefined, journalsPage);
   const [movements, setMovements, movementsReady] = useCollection<InventoryMovement>("inventory_movements", undefined, false);

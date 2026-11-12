@@ -202,6 +202,20 @@ dashboard reported a profit that ignored rent and salaries. The cards now carry 
 > never confused. The Owner Dashboard (R1) keeps its own management labels — *Realized revenue* and
 > *Net operating profit* — because they deliberately stop before rent and salaries.
 
+### Recording expenses
+
+`Accounting → Expenses` is the screen for the running costs — rent, salaries, marketing, packaging.
+It reads the **expense lines of the posted journal entries**, so what you see there is exactly what the
+Profit & Loss, the dashboard and the trial balance use (courier and delivery included; cost of goods
+sold is not, because it is posted from the sales themselves).
+
+**Add expense** writes a balanced journal entry — the expense account is debited and cash (or a
+receivable) is credited — so the amount reaches every profit figure at once. A role without approval
+rights saves it as a draft; it counts once someone posts it.
+
+The old cash-ledger list is still at `Accounting → All transactions` (`/accounting/ledger`) for the
+repeating-entry reminders. It is legacy: **it does not change the profit figures.**
+
 ### Customising it (the "row definition × column definition" idea)
 
 Like the account schedules in the big ERPs, the report is a **layout**, not a fixed screen:

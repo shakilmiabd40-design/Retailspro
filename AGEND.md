@@ -80,6 +80,12 @@ Reduce initial load and large list/report transfer time without changing order, 
   duplicates from the live database — the ledger's debit and credit totals were unchanged.
 - `src/app/api/accounting/overview` still reads the ledger correctly; only the dashboard's
   `/api/dashboard/finance` endpoint was reading the dead collection.
+- `Accounting → Expenses` was the same trap: the screen read and wrote the legacy `ledger` collection,
+  so it always showed ৳0 and anything added there never reached the profit figures — and there was no
+  way in the app to record an expense in the books at all. The screen now lists the expense lines of the
+  posted journal entries, and **Add expense** posts a balanced journal entry (expense account debited,
+  cash or receivable credited). The legacy list stays at `/accounting/ledger` for the repeating-entry
+  reminders, clearly marked as not affecting profit.
 
 ## Migration status (report redesign)
 
