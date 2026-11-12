@@ -168,10 +168,16 @@ the two missing real costs as their own lines:
 
 | Line | Source |
 | --- | --- |
-| Revenue, Cost of goods sold, Courier & delivery, Operating expenses, Other expenses, Other income | posted journal entries (the General Ledger) |
+| **Sales** | booked in the ledger: product sales plus the delivery charge billed, less discounts and returns |
+| Cost of goods sold | posted journal entries (FIFO cost) |
+| **Gross profit** | Sales − cost of goods sold |
+| Courier & delivery expense | posted journal entries |
 | **COD service fees** | the courier charge on delivered orders — *not in the ledger* |
 | **Ad spend** | `app_ad_spend` — *not in the ledger* |
-| Gross profit, **Net profit**, Net margin | calculated |
+| Operating expenses | posted journal entries (rent, salaries…) |
+| Other expenses | posted journal entries |
+| Other income | posted journal entries |
+| **Net profit**, Net margin | calculated |
 
 Nothing in the ledger changes: no journal entry is written, so the balance sheet and the trial
 balance are untouched. The report simply shows the two costs the books cannot see, and says so
@@ -191,9 +197,10 @@ collection, which the accounting module no longer writes to — every expense sh
 dashboard reported a profit that ignored rent and salaries. The cards now carry a reconciliation line
 (revenue − cost − expenses = net profit).
 
-> **Known difference:** the dashboard's *Sales* tile is trading revenue net of courier cost (delivered
-> orders), while the ledger's *Revenue* is booked revenue before courier cost. The money cards and the
-> profit/loss line are the books' figures.
+> **Naming:** the ledger's top line is **Sales**. The dashboard's trading card is **Net revenue**
+> (delivered orders, after courier costs) and shows the ledger's Sales next to it, so the two are
+> never confused. The Owner Dashboard (R1) keeps its own management labels — *Realized revenue* and
+> *Net operating profit* — because they deliberately stop before rent and salaries.
 
 ### Customising it (the "row definition × column definition" idea)
 

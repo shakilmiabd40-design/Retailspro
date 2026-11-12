@@ -27,7 +27,7 @@ const DEFAULT_LAYOUT: SectionSetting[] = [
   { key: "districts", visible: true, width: 1 }, { key: "products", visible: true, width: 3 },
   { key: "recent", visible: true, width: 1 },
 ];
-const SECTION_LABELS: Record<SectionKey, string> = { orders: "Orders", customers: "Customers", revenue: "Revenue", categories: "Top categories", finance: "Finance KPIs", chart: "Sales chart", districts: "Top districts", products: "Product sales", recent: "Recent orders" };
+const SECTION_LABELS: Record<SectionKey, string> = { orders: "Orders", customers: "Customers", revenue: "Net revenue", categories: "Top categories", finance: "Finance KPIs", chart: "Sales chart", districts: "Top districts", products: "Product sales", recent: "Recent orders" };
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring rounded-xl border px-3 py-1.5 text-[12.5px]";

@@ -54,7 +54,7 @@ export default function AccountingOverviewPage() {
         {links.map(([label, href]) => <Link key={href} className="rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} href={href}>{label}</Link>)}
       </nav>
       <KpiGrid columns={3} items={[
-        { label: "Revenue", value: taka(report.revenue) },
+        { label: "Sales", value: taka(report.revenue) },
         { label: "Cost of goods sold", value: taka(report.cogs) },
         { label: "Gross profit", value: taka(report.grossProfit), tone: report.grossProfit >= 0 ? "good" : "bad" },
         { label: "Other expenses", value: taka(report.expenses) },

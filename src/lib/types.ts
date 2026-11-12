@@ -38,7 +38,7 @@ export type CustomersKpi = {
 };
 
 export type RevenueKpi = {
-  /** Delivered product revenue in the period. */
+  /** Delivered product revenue in the period, after courier costs. */
   last30: number;
   prev30: number;
   trend: Trend | null;
@@ -46,6 +46,8 @@ export type RevenueKpi = {
   last7Days: SparkPoint[];
   periodLabel?: string;
   prevLabel?: string;
+  /** Sales booked in the ledger for the same period (before courier cost). */
+  sales?: number;
 };
 
 export type TopCategory = {

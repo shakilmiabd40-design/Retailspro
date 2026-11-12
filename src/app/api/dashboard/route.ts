@@ -9,6 +9,7 @@ import { requireAuth } from "@/server/auth";
 import { canRead, COLLECTION_ACCESS } from "@/server/collections";
 import { canSeeProductCost, redactProductCost } from "@/server/redact";
 import { loadDashboardOrders, loadDashboardProducts } from "@/server/reports/dashboard-source";
+import { getLedgerSales } from "@/server/reports/profit-loss";
 import { RevisionCache, revisionKey } from "@/server/revision-cache";
 
 export const dynamic = "force-dynamic";
@@ -35,20 +36,24 @@ export const GET = route(async (req) => {
   const revisions = await revisionKey(["orders", "products", ...(canReadInvoices ? ["pos_invoices"] : []), ...(canReadLedger ? ["ledger"] : [])]);
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const cacheKey = JSON.stringify({ revisions, from, to, label, today, canReadInvoices, canReadLedger, seesCost });
+  const canReadJournal = canRead(auth.role, COLLECTION_ACCESS.journal_entries);
+  const cacheKey = JSON.stringify({ revisions, from, to, label, today, canReadInvoices, canReadLedger, canReadJournal, seesCost });
   const data = await dashboardCache.get(cacheKey, async () => {
     const load = async <T,>(collection: string): Promise<T[]> => {
       const { rows } = await query<{ data: T }>("select data from app_records where collection=$1", [collection]);
       return rows.map((row) => row.data);
     };
-    const [orders, storedProducts, invoices, ledger] = await Promise.all([
+    const [orders, storedProducts, invoices, ledger, sales] = await Promise.all([
       loadDashboardOrders(),
       loadDashboardProducts(),
       canReadInvoices ? load<PosInvoice>("pos_invoices") : Promise.resolve([]),
       canReadLedger ? load<LedgerEntry>("ledger") : Promise.resolve([]),
+      canReadJournal ? getLedgerSales(from, to) : Promise.resolve(undefined),
     ]);
     const products = seesCost ? storedProducts : storedProducts.map((product) => redactProductCost(product) as Product);
-    return buildDashboard(orders, products, now, ledger, invoices, dateRange);
+    const dashboard = buildDashboard(orders, products, now, ledger, invoices, dateRange);
+    // Sales as booked in the ledger — the figure the Accounting screens show.
+    return sales === undefined ? dashboard : { ...dashboard, revenue: { ...dashboard.revenue, sales } };
   });
   return json({ data });
 });

@@ -244,6 +244,21 @@ export async function getProfitLossReport(options: ProfitLossOptions): Promise<P
 
 const LINE_DEFS_BY_KEY = new Map(PNL_LINE_DEFS.map((def) => [def.key, def]));
 
+/** Sales booked in the ledger for a period — revenue accounts other than other income. */
+export async function getLedgerSales(from: string, to: string): Promise<number> {
+  const { rows } = await query<{ sales: string }>(
+    `select coalesce(sum(case when a.data->>'type' = 'revenue' and a.data->>'code' <> '4030'
+       then (l->>'credit')::numeric - (l->>'debit')::numeric else 0 end), 0)::text as sales
+     from app_records j
+     cross join lateral jsonb_array_elements(coalesce(j.data->'lines','[]'::jsonb)) l
+     join app_records a on a.collection='chart_of_accounts' and a.id = l->>'accountId'
+     where j.collection='journal_entries' and j.data->>'status' = 'posted'
+       and j.data->>'date' >= $1 and j.data->>'date' <= $2`,
+    [from, to],
+  );
+  return Number(rows[0]?.sales ?? 0) || 0;
+}
+
 /**
  * The money side of the dashboard. Same books as the Profit & Loss statement,
  * so the dashboard and Accounting can never show different profit.

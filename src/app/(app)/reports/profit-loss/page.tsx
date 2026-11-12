@@ -258,7 +258,7 @@ export default function ProfitLossReportPage() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="card p-4">
-          <p className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Revenue</p>
+          <p className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Sales</p>
           <p className="text-[20px] font-semibold tabular-nums" style={{ color: "var(--text)" }}>{taka(revenue[0] ?? 0)}</p>
         </div>
         <div className="card p-4">
@@ -322,13 +322,13 @@ export default function ProfitLossReportPage() {
       )}
 
       {payload.breakdown && payload.breakdown.length > 0 && (
-        <Panel title="Breakdown" subtitle="Revenue and product cost for the current period.">
+        <Panel title="Breakdown" subtitle="Product sales and product cost for the current period — delivered orders, split by the chosen dimension.">
           <table className="w-full min-w-[520px] text-[13px]">
             <thead>
               <tr className="text-left text-[11.5px] uppercase" style={{ color: "var(--text-faint)" }}>
                 <th className="px-2 py-2">{PNL_DIMENSIONS.find((d) => d.key === dimension)?.label ?? "Breakdown"}</th>
                 <th className="px-2 py-2 text-right">Orders</th>
-                <th className="px-2 py-2 text-right">Revenue</th>
+                <th className="px-2 py-2 text-right">Product sales</th>
                 <th className="px-2 py-2 text-right">Product cost</th>
                 <th className="px-2 py-2 text-right">Gross profit</th>
               </tr>

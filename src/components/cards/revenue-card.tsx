@@ -12,7 +12,7 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
       <div className="mb-1 flex items-start justify-between">
         <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>
           <span title="Delivered product sales after discounts plus delivery billed, minus courier costs.">
-            {data.periodLabel ? `Sales · ${data.periodLabel}` : "Sales · Last 30 Days"}
+            {data.periodLabel ? `Net revenue · ${data.periodLabel}` : "Net revenue · Last 30 Days"}
           </span>
         </p>
         <Wallet size={16} style={{ color: "var(--text-faint)" }} />
@@ -29,6 +29,7 @@ export function RevenueCard({ data }: { data: RevenueKpi }) {
       </p>
       <p className="mt-2 text-[11px]" style={{ color: "var(--text-faint)" }}>
         Delivered orders · after courier costs
+        {data.sales !== undefined && <span className="block">Sales in the ledger is {formatCurrency(data.sales)}</span>}
       </p>
 
       <div className="mt-2 h-20">

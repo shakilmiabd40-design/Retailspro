@@ -44,7 +44,7 @@ export interface PnlLineDef {
 
 /** The default statement. Order matters — it is the order the lines are shown in. */
 export const PNL_LINE_DEFS: PnlLineDef[] = [
-  { key: "revenue", label: "Revenue", kind: "detail", help: "Sales from delivered orders and walk-in POS sales." },
+  { key: "revenue", label: "Sales", kind: "detail", help: "Sales booked in the ledger: product sales plus the delivery charge billed, less discounts and returns." },
   { key: "otherIncome", label: "Other income", kind: "detail", optional: true },
   { key: "cogs", label: "Cost of goods sold", kind: "detail", cost: true },
   { key: "grossProfit", label: "Gross profit", kind: "subtotal" },

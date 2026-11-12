@@ -121,7 +121,7 @@ export default function ProfitLossPage() {
       </nav>
 
       <Panel title="Revenue vs net profit">
-        <TrendChart data={trend} series={[{ key: "revenue", label: "Revenue", color: COLORS.blue }, { key: "netProfit", label: "Net profit", color: COLORS.green }]} format={taka} height={240} />
+        <TrendChart data={trend} series={[{ key: "revenue", label: "Sales", color: COLORS.blue }, { key: "netProfit", label: "Net profit", color: COLORS.green }]} format={taka} height={240} />
       </Panel>
 
       <div className="card overflow-x-auto">
