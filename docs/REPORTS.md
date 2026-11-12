@@ -185,6 +185,16 @@ The **Accounting → Profit & Loss** screen reads the *same* engine (it passes i
 two screens can never disagree. The Accounting screen keeps its month columns (3 / 6 / 12 months or a
 custom range) and the CSV export.
 
+The **dashboard's money cards** (Expenses, Net Profit, Biggest expense, Money in accounts) read the same
+posted ledger, so they agree with the Accounting screens too. They used to read the old `ledger`
+collection, which the accounting module no longer writes to — every expense showed as zero and the
+dashboard reported a profit that ignored rent and salaries. The cards now carry a reconciliation line
+(revenue − cost − expenses = net profit).
+
+> **Known difference:** the dashboard's *Sales* tile is trading revenue net of courier cost (delivered
+> orders), while the ledger's *Revenue* is booked revenue before courier cost. The money cards and the
+> profit/loss line are the books' figures.
+
 ### Customising it (the "row definition × column definition" idea)
 
 Like the account schedules in the big ERPs, the report is a **layout**, not a fixed screen:

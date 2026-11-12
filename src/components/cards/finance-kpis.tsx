@@ -5,10 +5,24 @@ import Link from "next/link";
 import { Landmark, PiggyBank, Receipt, TrendingUp } from "lucide-react";
 import { dayKey, parseDay } from "@/lib/accounting/utils";
 import { api } from "@/lib/persist/api";
-import type { ProfitLoss } from "@/lib/accounting/utils";
 import { formatCurrency } from "@/lib/format";
 import { TrendPill } from "@/components/trend-pill";
 import type { Trend } from "@/lib/types";
+
+interface FinanceSummary {
+  netProfit: number;
+  expenses: number;
+  revenue: number;
+  cogs: number;
+  biggestExpense: { name: string; amount: number } | null;
+}
+
+interface FinancePayload {
+  cur: FinanceSummary;
+  prev: FinanceSummary;
+  balance: number;
+  accountCount: number;
+}
 
 const trendOf = (cur: number, prev: number): Trend | null => {
   if (!prev) return null;
@@ -38,7 +52,7 @@ export function FinanceKpis({ from, to, label }: { from?: string; to?: string; l
     const now = new Date();
     const curFrom = from ?? dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
     const curTo = to ?? dayKey(now);
-    
+
     // Previous comparison period of equal length
     const fDate = parseDay(curFrom);
     const tDate = parseDay(curTo);
@@ -50,11 +64,11 @@ export function FinanceKpis({ from, to, label }: { from?: string; to?: string; l
 
     return { curFrom, curTo, fromPrev, toPrev };
   }, [from, to]);
-  const [report, setReport] = useState<{ cur: ProfitLoss; prev: ProfitLoss; balance: number; accountCount: number } | null>(null);
+  const [report, setReport] = useState<FinancePayload | null>(null);
   useEffect(() => {
     let current = true;
     const params = new URLSearchParams({ from: data.curFrom, to: data.curTo, previousFrom: data.fromPrev, previousTo: data.toPrev });
-    api<{ cur: ProfitLoss; prev: ProfitLoss; balance: number; accountCount: number }>("GET", `/api/dashboard/finance?${params}`)
+    api<FinancePayload>("GET", `/api/dashboard/finance?${params}`)
       .then((result) => { if (current) setReport(result); })
       .catch(() => { if (current) setReport(null); });
     return () => { current = false; };
@@ -62,15 +76,22 @@ export function FinanceKpis({ from, to, label }: { from?: string; to?: string; l
   if (!report) return null;
 
   const { cur, prev, balance, accountCount } = report;
-  const top = cur.expensesByCategory[0];
+  const top = cur.biggestExpense;
   const periodText = label ? ` · ${label}` : " · Last 30 Days";
 
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-      <Card title={`Expenses${periodText}`} icon={<Receipt size={16} />} value={formatCurrency(cur.operatingExpenses)} sub={`${formatCurrency(prev.operatingExpenses)} in the previous period`} href="/accounting/expenses" trend={trendOf(cur.operatingExpenses, prev.operatingExpenses)} />
-      <Card title={`Net Profit${periodText}`} icon={<TrendingUp size={16} />} value={formatCurrency(cur.netProfit)} sub="After product, courier & running costs" href="/accounting/profit-loss" trend={trendOf(cur.netProfit, prev.netProfit)} bad={cur.netProfit < 0} />
-      <Card title="Biggest expense" icon={<PiggyBank size={16} />} value={top ? formatCurrency(top.amount) : "—"} sub={top ? top.category : "No expenses recorded yet"} href="/accounting/expenses" />
-      <Card title="Money in accounts" icon={<Landmark size={16} />} value={accountCount ? formatCurrency(balance) : "—"} sub={accountCount ? `${accountCount} account${accountCount === 1 ? "" : "s"}` : "Add accounts to track balances"} href="/accounting/accounts" bad={balance < 0} />
+    <div>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <Card title={`Expenses${periodText}`} icon={<Receipt size={16} />} value={formatCurrency(cur.expenses)} sub={`${formatCurrency(prev.expenses)} in the previous period`} href="/accounting/expenses" trend={trendOf(cur.expenses, prev.expenses)} />
+        <Card title={`Net Profit${periodText}`} icon={<TrendingUp size={16} />} value={formatCurrency(cur.netProfit)} sub="After product, courier & running costs" href="/accounting/profit-loss" trend={trendOf(cur.netProfit, prev.netProfit)} bad={cur.netProfit < 0} />
+        <Card title="Biggest expense" icon={<PiggyBank size={16} />} value={top ? formatCurrency(top.amount) : "—"} sub={top ? top.name : "No expenses recorded yet"} href="/accounting/expenses" />
+        <Card title="Money in accounts" icon={<Landmark size={16} />} value={accountCount ? formatCurrency(balance) : "—"} sub={accountCount ? `${accountCount} cash account${accountCount === 1 ? "" : "s"}` : "Add accounts to track balances"} href="/accounting/accounts" bad={balance < 0} />
+      </div>
+      <p className="mt-2 text-[11.5px]" style={{ color: "var(--text-faint)" }}>
+        From the posted ledger — the same numbers as Accounting → Profit & Loss:{" "}
+        {formatCurrency(cur.revenue)} revenue − {formatCurrency(cur.cogs)} cost − {formatCurrency(cur.expenses)} expenses = {formatCurrency(cur.netProfit)} net profit.
+        {" "}Sales above is trading revenue net of courier cost, so it is not the ledger&apos;s revenue.
+      </p>
     </div>
   );
 }

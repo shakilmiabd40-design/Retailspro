@@ -12,6 +12,7 @@
     "db:backup": "node scripts/backup-db.mjs",
     "check:dashboard": "npx --yes tsx --conditions=react-server scripts/dashboard-diff.check.ts",
     "check:profit": "npx --yes tsx --conditions=react-server scripts/profit-compare.check.ts",
+    "check:finance": "npx --yes tsx --conditions=react-server scripts/finance-agreement.check.ts",
     "check:profit-loss": "npx --yes tsx --conditions=react-server scripts/profit-loss.check.ts",
     "check:query": "npx --yes tsx --conditions=react-server scripts/query-builder.check.ts",
     "test:pos": "npx --yes tsx --test src/lib/pos/utils.test.ts",

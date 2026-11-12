@@ -13,6 +13,27 @@ type Result = { ok: true; data?: any } | { ok: false; error: string };
 const fail = (error: string): Result => ({ ok: false, error });
 const uid = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
+/**
+ * The default chart of accounts, with parent links resolved.
+ *
+ * Built once per call — the ids are random, so the same account must never be
+ * seeded twice (see the note on the seeding effect below).
+ */
+function buildDefaultCoa(): ChartOfAccount[] {
+  const now = new Date().toISOString();
+  const map = new Map<string, string>();
+  const items: ChartOfAccount[] = DEFAULT_COA.map((d: any) => {
+    const id = uid();
+    map.set(d.code, id);
+    return { ...d, id, createdAt: now } as ChartOfAccount;
+  });
+  return items.map((it) => {
+    const pcode = (DEFAULT_COA.find((x: any) => x.code === it.code) as any)?.parentCode;
+    if (pcode && map.get(pcode)) return { ...it, parentId: map.get(pcode) };
+    return it;
+  });
+}
+
 export interface JournalEntryInput {
   date: string;
   ref?: string;
@@ -72,43 +93,19 @@ export function GLProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (coaReady && coa.length === 0) {
-      const now = new Date().toISOString();
-      const map = new Map<string, string>();
-      const items: ChartOfAccount[] = DEFAULT_COA.map((d: any) => {
-        const id = uid();
-        map.set(d.code, id);
-        return { ...d, id, createdAt: now } as ChartOfAccount;
-      });
-      // set parents
-      const withParents = items.map(it => {
-        const pcode = (DEFAULT_COA.find((x:any)=>x.code===it.code) as any)?.parentCode;
-        if (pcode && map.get(pcode)) return { ...it, parentId: map.get(pcode) };
-        return it;
-      });
-      setCoa(withParents);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coaReady, coa.length]);
+    if (!coaReady) return;
+    // Seed through the updater form: the effect can run twice (React's StrictMode
+    // does exactly that in development) and the state has not landed yet when the
+    // second run happens. Checking `coa.length` outside the updater seeded the whole
+    // chart of accounts twice, leaving a duplicate of every account behind.
+    setCoa((prev) => (prev.length > 0 ? prev : buildDefaultCoa()));
+  }, [coaReady, setCoa]);
 
   const value = useMemo<GLContextValue>(() => ({
     coa, journals, movements, layers, adjustments, grni, apInvoices, periods, config,
     hydrated: coaReady && journalsReady && movementsReady && layersReady && adjustmentsReady && grniReady && apReady && periodsReady && configReady,
     ensureDefaultCoa() {
-      if (coa.length > 0) return;
-      const now = new Date().toISOString();
-      const map = new Map<string, string>();
-      const items: ChartOfAccount[] = DEFAULT_COA.map((d: any) => {
-        const id = uid();
-        map.set(d.code, id);
-        return { ...d, id, createdAt: now } as ChartOfAccount;
-      });
-      const withParents = items.map(it => {
-        const pcode = (DEFAULT_COA.find((x:any)=>x.code===it.code) as any)?.parentCode;
-        if (pcode && map.get(pcode)) return { ...it, parentId: map.get(pcode) };
-        return it;
-      });
-      setCoa(withParents);
+      setCoa((prev) => (prev.length > 0 ? prev : buildDefaultCoa()));
     },
     addJournalEntry(input, post=false) {
       if (!can("accounting", "create")) return fail("Permission denied");

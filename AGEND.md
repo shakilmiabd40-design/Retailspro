@@ -34,6 +34,8 @@ Reduce initial load and large list/report transfer time without changing order, 
 - `npm run check:dashboard` proves the narrow dashboard/P&L read produces byte-identical output to the
   previous full-record read, for five date ranges, both cost-visibility modes and three P&L periods.
 - `npm run check:profit` prints the gap between the Owner Dashboard's profit and the Accounting P&L.
+- `npm run check:finance` proves the dashboard money cards, the Profit & Loss statement and the
+  Accounting overview agree on revenue, cost, expenses and net profit for the same period.
 - The Accounting P&L and the Reports P&L are the same engine now: the Accounting screen passes its own
   periods, the Reports screen its named columns, and both show the same statement (verified against the
   live database — all ten lines identical).
@@ -65,6 +67,19 @@ Reduce initial load and large list/report transfer time without changing order, 
    board and the report filter bar need them. Narrowing them means giving the stock board a server-side
    source on non-dashboard routes — a notification-lifecycle change, so it is not done here.
 4. Review all route-scoped store transitions and validate actual sync, courier fallback, notification snapshots, and accounting behavior before considering the work complete.
+
+## Fixed while auditing the numbers
+
+- The dashboard's money cards read the old `ledger` collection, which the accounting module stopped
+  writing to when it moved to the General Ledger. Every expense showed as zero and the dashboard's
+  "Net Profit" ignored rent and salaries. They now read the posted ledger, so the dashboard, the
+  Accounting overview and the Profit & Loss statement agree (verified with `npm run check:finance`).
+- The chart of accounts had been seeded twice (the seeding effect and the history conversion each
+  created their own copy), leaving 32 duplicate accounts behind. The seeding now goes through the
+  updater form so it cannot run twice, and `scripts/clean-duplicate-accounts.mjs` removed the unused
+  duplicates from the live database — the ledger's debit and credit totals were unchanged.
+- `src/app/api/accounting/overview` still reads the ledger correctly; only the dashboard's
+  `/api/dashboard/finance` endpoint was reading the dead collection.
 
 ## Migration status (report redesign)
 

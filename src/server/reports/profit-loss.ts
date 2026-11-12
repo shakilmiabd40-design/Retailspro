@@ -1,6 +1,7 @@
 import "server-only";
 import {
   buildPnlStatement,
+  netProfitOf,
   PNL_LINE_DEFS,
   type PnlDimension,
   type PnlLineDef,
@@ -242,3 +243,72 @@ export async function getProfitLossReport(options: ProfitLossOptions): Promise<P
 }
 
 const LINE_DEFS_BY_KEY = new Map(PNL_LINE_DEFS.map((def) => [def.key, def]));
+
+/**
+ * The money side of the dashboard. Same books as the Profit & Loss statement,
+ * so the dashboard and Accounting can never show different profit.
+ */
+export interface FinanceSummary {
+  netProfit: number;
+  /** Every cost except cost of goods sold, from the posted ledger. */
+  expenses: number;
+  revenue: number;
+  cogs: number;
+  /** The largest expense account in the period. */
+  biggestExpense: { name: string; amount: number } | null;
+}
+
+/** Cash and bank money, per the posted ledger. */
+export interface CashPosition {
+  balance: number;
+  accountCount: number;
+}
+
+export async function getFinanceSummaries(periods: PnlPeriod[]): Promise<FinanceSummary[]> {
+  const [gl, adSpend, codFees] = await Promise.all([loadGlTotals(periods), loadAdSpend(periods), loadCodFees(periods)]);
+
+  return periods.map((period, index) => {
+    const totals = gl.totals[index];
+    const expenses = totals.courier + totals.operating + totals.otherExpenses;
+
+    let biggestExpense: FinanceSummary["biggestExpense"] = null;
+    for (const account of gl.accounts) {
+      if (account.type !== "expense") continue;
+      if (account.code.startsWith("5")) continue; // cost of goods sold is not an expense line
+      const amount = account.values[index] ?? 0;
+      if (!amount) continue;
+      if (!biggestExpense || amount > biggestExpense.amount) biggestExpense = { name: account.name, amount };
+    }
+
+    return {
+      netProfit: netProfitOf({ ...totals, adSpend: adSpend[index] ?? 0, codFees: codFees[index] ?? 0 }),
+      expenses,
+      revenue: totals.revenue + totals.otherIncome,
+      cogs: totals.cogs,
+      biggestExpense,
+    };
+  });
+}
+
+/** Cash in hand plus the bank accounts, per the posted ledger. */
+export async function getCashPosition(): Promise<CashPosition> {
+  const { rows } = await query<{ name: string; balance: string; accounts: string }>(
+    `select a.data->>'name' as name,
+       coalesce(sum((l->>'debit')::numeric - (l->>'credit')::numeric), 0)::text as balance,
+       count(*)::text as accounts
+     from app_records j
+     cross join lateral jsonb_array_elements(coalesce(j.data->'lines','[]'::jsonb)) l
+     join app_records a on a.collection='chart_of_accounts' and a.id=l->>'accountId'
+     where j.collection='journal_entries' and j.data->>'status'='posted'
+       and a.data->>'code' in ('1010','1020','1030')
+     group by 1`,
+  );
+  const posted = rows.reduce((sum, row) => sum + (Number(row.balance) || 0), 0);
+  // Count the cash accounts that exist, even when nothing has been posted to them yet.
+  const { rows: defined } = await query<{ n: string }>(
+    `select count(distinct data->>'code')::text as n from app_records
+      where collection='chart_of_accounts' and data->>'code' in ('1010','1020','1030') and coalesce((data->>'archived')::boolean,false) = false`,
+  );
+  const accountCount = Math.max(Number(defined[0]?.n ?? 0) || 0, rows.length);
+  return { balance: posted, accountCount };
+}
