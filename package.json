@@ -12,6 +12,8 @@
     "db:backup": "node scripts/backup-db.mjs",
     "check:dashboard": "npx --yes tsx --conditions=react-server scripts/dashboard-diff.check.ts",
     "check:profit": "npx --yes tsx --conditions=react-server scripts/profit-compare.check.ts",
+    "check:profit-loss": "npx --yes tsx --conditions=react-server scripts/profit-loss.check.ts",
+    "check:query": "npx --yes tsx --conditions=react-server scripts/query-builder.check.ts",
     "test:pos": "npx --yes tsx --test src/lib/pos/utils.test.ts",
     "test:accounting": "npx --yes tsx --test src/lib/accounting/utils.test.ts",
     "test:accounting-gl": "npx --yes tsx --test --conditions=react-server src/lib/accounting/fifo.test.ts src/server/accounting/guards.test.ts",
@@ -25,7 +27,7 @@
     "test:exchange": "npx --yes tsx --test src/lib/orders/exchange.test.ts",
     "test:steadfast": "npx --yes tsx --test src/server/courier/steadfast-status.test.ts",
     "test:settlements": "npx --yes tsx --test src/lib/settlements/compute.test.ts",
-    "test:reports": "npx --yes tsx --test src/lib/reports/period.test.ts src/server/reports/cod.test.ts src/server/reports/order-days.test.ts src/server/reports/settlement-summary.test.ts src/server/reports/report-builders.test.ts src/server/reports/purchase-report.test.ts src/server/reports/inventory-report.test.ts",
+    "test:reports": "npx --yes tsx --test src/lib/reports/period.test.ts src/lib/reports/profit-loss.test.ts src/lib/reports/query-builder.test.ts src/server/reports/cod.test.ts src/server/reports/order-days.test.ts src/server/reports/settlement-summary.test.ts src/server/reports/report-builders.test.ts src/server/reports/purchase-report.test.ts src/server/reports/inventory-report.test.ts",
     "test:server": "npx --yes tsx --test --conditions=react-server src/server/auth.test.ts src/server/collections.test.ts src/server/publicapi/webhooks.test.ts src/server/validate.test.ts src/server/redact.test.ts",
     "test:db": "npx --yes tsx --test --conditions=react-server src/server/db.test.ts"
   },

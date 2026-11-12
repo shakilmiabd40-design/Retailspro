@@ -20,6 +20,7 @@ import {
   Clock,
   PackageCheck,
   PackageX,
+  TrendingUp,
   RotateCcw,
   Ban,
   ShieldCheck,
@@ -212,6 +213,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
       perm: { module: "reports", action: "view" },
       children: [
         { label: "Dashboard (Summary)", href: "/reports", icon: LayoutGrid },
+        { label: "Profit & Loss", href: "/reports/profit-loss", icon: TrendingUp },
         { label: "Sales by Channel", href: "/reports/channels", icon: Store },
         { label: "Sales & COD", href: "/reports/sales-cod", icon: Wallet },
         { label: "Courier Cost & P/L", href: "/reports/courier", icon: Truck },
@@ -224,6 +226,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         { label: "Supplier Report", href: "/reports/suppliers", icon: Store },
         { label: "Returns Report", href: "/reports/returns", icon: Undo2 },
         { label: "Warranty Report", href: "/reports/warranty", icon: ShieldCheck },
+        { label: "Report Builder", href: "/reports/query", icon: SlidersHorizontal },
         { label: "Sync Health", href: "/reports/sync-health", icon: Plug },
       ],
     },

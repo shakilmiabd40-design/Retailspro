@@ -30,9 +30,13 @@ Reduce initial load and large list/report transfer time without changing order, 
 
 - `npx tsc --noEmit` passes after the latest changes.
 - `npm run build` passes.
-- `npm run test:reports` passes (43 focused report tests).
+- `npm run test:reports` passes (57 focused report tests).
 - `npm run check:dashboard` proves the narrow dashboard/P&L read produces byte-identical output to the
   previous full-record read, for five date ranges, both cost-visibility modes and three P&L periods.
+- `npm run check:profit` prints the gap between the Owner Dashboard's profit and the Accounting P&L.
+- `npm run check:profit-loss` runs the new Profit & Loss report against the live database and proves the
+  statement adds up; it also checks the ad-spend and COD-fee SQL against synthetic rows.
+- `npm run check:query` runs every report-builder dataset with every dimension and measure.
 - `npm run lint` is clean (the one remaining `react-hooks/set-state-in-effect` error in
   `src/lib/notifications/store.tsx` was fixed by moving the snapshot reset into React's "adjust state
   during render" pattern, which keeps the exact behaviour).
@@ -64,6 +68,7 @@ Reduce initial load and large list/report transfer time without changing order, 
 | Report | Read source |
 | --- | --- |
 | Owner Dashboard, Sales by Channel, Sync Health | Server (`/api/reports/daily-summary`, `/api/reports/sync-health`) |
+| Profit & Loss, Report Builder | Server (`/api/reports/profit-loss`, `/api/reports/query`) |
 | Sales & COD, Courier Cost & Profit/Loss | Server (`/api/reports/sales-cod`, `/api/reports/courier`) |
 | Order Status, Product Sales | Server (`/api/reports/order-status`, `/api/reports/product-sales`) |
 | Purchase, Supplier | Server (`/api/reports/purchases`, `/api/reports/suppliers`) |

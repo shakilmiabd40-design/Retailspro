@@ -5,6 +5,8 @@ Twelve reports under **Reports** in the sidebar, all built from the same live da
 | Report | Route | Default date type |
 | --- | --- | --- |
 | Owner Dashboard (R1) | `/reports` | Delivered Date |
+| **Profit & Loss** | `/reports/profit-loss` | Delivered Date |
+| **Report Builder** | `/reports/query` | — |
 | Sales by Channel (R2) | `/reports/channels` | Delivered Date |
 | Sync Health (R12) | `/reports/sync-health` | Live queue |
 | Sales & COD | `/reports/sales-cod` | Delivered Date |
@@ -150,6 +152,58 @@ returns or product records for these screens.
   last N days (default 60), measured in Asia/Dhaka business days.
 
 
+## Profit & Loss, layouts and the report builder (Phase 6)
+
+Three new screens in the Reports area.
+
+### `Reports → Profit & Loss` — one profit number
+
+The app used to show **two different profit numbers**: the Owner Dashboard (orders + POS +
+ad spend, before fixed overheads) and the Accounting P&L (posted journal entries). They disagreed
+because **ad spend and COD service fees never become journal entries**, while rent and salaries
+only ever reached the ledger.
+
+The new report is built on the **books** (posted journal entries and the chart of accounts) and adds
+the two missing real costs as their own lines:
+
+| Line | Source |
+| --- | --- |
+| Revenue, Cost of goods sold, Courier & delivery, Operating expenses, Other expenses, Other income | posted journal entries (the General Ledger) |
+| **COD service fees** | the courier charge on delivered orders — *not in the ledger* |
+| **Ad spend** | `app_ad_spend` — *not in the ledger* |
+| Gross profit, **Net profit**, Net margin | calculated |
+
+Nothing in the ledger changes: no journal entry is written, so the balance sheet and the trial
+balance are untouched. The report simply shows the two costs the books cannot see, and says so
+under **Not in the ledger**. `npm run check:profit` prints the gap between the two views;
+`npm run check:profit-loss` prints the statement and proves it adds up.
+
+A role without the products *financial* permission (or accounting access) sees the sales side but
+not the cost, the profit or the money behind them — the same rule the Owner Dashboard uses.
+
+### Customising it (the "row definition × column definition" idea)
+
+Like the account schedules in the big ERPs, the report is a **layout**, not a fixed screen:
+
+- **Columns** — the periods to compare: Current period, Previous period (the same number of days,
+  ending the day before), Year to date, Same period last year.
+- **Rows** — toggle the lines on and off and reorder them.
+- **Breakdown** — slice the revenue by **channel**, **campaign**, **product category** or **courier**.
+
+Layouts are saved as named presets in the `report_presets` document (no new table, no migration) and
+are shared by everyone. A layout changes what the report *shows* — never what it counts.
+
+### `Reports → Report Builder` — ask your own question
+
+The ad-hoc builder, like the pivot and analysis views in modern ERPs. Pick a dataset (Orders,
+Products, Purchase orders, Returns), what to group by and what to total, plus a date range and the
+filters that dataset understands.
+
+Every dataset, field, dimension and measure is a **fixed, named entry** and every value travels as a
+query parameter — the builder never runs a query you wrote. `npm run check:query` runs every dataset
+with every dimension and measure against the live database so a broken expression shows up there
+rather than in the browser.
+
 ## Returns and warranty (Phase 5)
 
 `GET /api/reports/returns` and `GET /api/reports/warranties` keep returning the raw records they always
@@ -185,6 +239,11 @@ orders and it writes through `/api/sync`.
 | `src/server/reports/purchase-candidates.ts` | Purchase order candidates, supplier names, variant costs |
 | `src/server/reports/inventory.ts` | Inventory stock and valuation rows and KPIs |
 | `src/server/reports/inventory-data.ts` | Narrow product, purchase-order, notification and last-sold reads |
+| `src/lib/reports/profit-loss.ts` | The Profit & Loss statement: lines, columns, layouts (pure) |
+| `src/server/reports/profit-loss.ts` | Loads the ledger, ad spend and COD fees for the statement |
+| `src/server/reports/profit-loss-presets.ts` | Saved layouts in the `report_presets` document |
+| `src/lib/reports/query-builder.ts` | Report builder catalogue: datasets, fields, dimensions, measures |
+| `src/server/reports/query-builder.ts` | Runs a builder request (fixed SQL, parameterised values) |
 | `src/server/reports/settlement-summary.ts` | Saved-policy settlement position used by server reports |
 | `src/server/reports/cod.ts` | COD pending/ageing maths against the settlement ledger |
 | `src/lib/reports/use-report.ts` | Client hook for the server-backed report endpoints |
