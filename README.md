@@ -133,8 +133,8 @@ scripts/setup-db.mjs                npm run db:setup / db:reset
 
 1. Push the repo to GitHub and import it at [vercel.com/new](https://vercel.com/new) (Next.js is auto-detected).
 2. Add `DATABASE_URL` (and optionally `DATABASE_CA_CERT`, `SETUP_TOKEN`, `DATABASE_POOL_MAX=1`) under
-   **Settings → Environment Variables**. On Neon use the **pooled** connection string; on Aiven free, an Aiven
-   connection pool (PgBouncer) string — see "Database connections" below.
+   **Settings → Environment Variables**. On Neon use the **pooled** connection string; on Aiven use an Aiven
+   connection pool (PgBouncer) string — see "Database connections" below. Set `DATABASE_POOL_MAX=1` on Vercel.
 3. Run `npm run db:setup` once from your machine with the same `DATABASE_URL` in `.env.local`.
 4. Deploy, open the site, and create the first Super Admin.
 
@@ -172,22 +172,33 @@ and receive **signed webhooks** when an order's status or a product's stock chan
 - SMS, and email for the other event types on that page (new order, return request, settlement reminder), are still just recorded preferences — nothing is sent for those yet.
 - Run `npm run db:setup` once after upgrading (adds one small tracking table; safe to re-run).
 
-## Database connections ("remaining connection slots are reserved…")
+## Database connections ("remaining connection slots are reserved…" / "too many connections")
 
 That error means the database ran out of connections. Hosted Postgres allows only a few in total (Aiven free = 20, and Aiven
 keeps some for itself), and **every server instance keeps its own pool** — on Vercel each serverless function instance is one,
-and each open tab keeps polling. What the app does about it: a small pool (2 connections per instance by default, freed after
-5 s idle), automatic retry with back-off when the database says it is full, and a friendly "database is busy, try again"
-(HTTP 503) instead of a crash.
+and each open tab keeps polling.
 
-If you still see it regularly:
+What the app does about it:
+
+- **One connection per instance**, closed again as soon as it has been idle for a few seconds. On a serverless host the
+  instance is *frozen* between requests, and a frozen instance never runs its timers — so a connection that is only released
+  "after N ms idle" stays open on the database until the socket dies. The pool is therefore configured to give the
+  connection back the moment the work is done (`allowExitOnIdle`), and to fail fast (8 s) with a friendly
+  "database is busy" answer (HTTP 503) instead of a platform timeout.
+- **Automatic retry with back-off** when the database says it is full, and the browser repeats the request that hit a busy
+  database instead of showing an error — a short busy spell heals itself.
+- A connection that died while the instance was asleep is replaced automatically.
+
+If you still see it regularly, the app is sharing the database with more instances than the plan allows:
 
 1. **Use Aiven's built-in connection pooler (best fix).** Aiven console → your service → *Connection pools* → *Add pool*
    (mode **Transaction**, size 10–15). Use that pool's connection string as `DATABASE_URL`. Many app connections then share a few real ones.
-2. Set `DATABASE_POOL_MAX=1` on serverless hosts (Vercel/Netlify) in the environment, or 2 on a single server. Don't go below 2 while using restore/import.
+2. Set `DATABASE_POOL_MAX=1` on serverless hosts (Vercel/Netlify) in the environment, or 2 on a single server.
 3. Old idle connections from dev servers or other deployments also count — stop unused ones (a local `npm run dev` left
    running against the same database holds its own pool).
-4. Upgrade the database plan for more connection slots.
+4. Upgrade the database plan for more connection slots (Aiven: service parameters → `max_connections`).
+5. Check who is holding the slots: Aiven console → your service → *Users* shows every connection with its
+   `application_name` (the app tags its connections `retailspro`).
 
 ## Accounting module
 

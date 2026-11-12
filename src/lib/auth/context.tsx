@@ -56,6 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [session, setSession] = useState<{ user: SessionUser; policy: PasswordPolicy } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const goToLogin = useCallback((reason?: string) => {
     if (leaving) return;
@@ -65,29 +67,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    api<{ user: SessionUser; policy: PasswordPolicy }>("GET", "/api/auth/me")
-      .then((res) => {
-        if (cancelled) return;
-        if (res.user.mustResetPassword) {
-          leaving = true;
-          window.location.assign("/change-password");
-          return;
-        }
-        setSession(res);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof HttpError && err.status === 401) return goToLogin();
-        if (err instanceof HttpError && err.code === "password_change_required") {
-          window.location.assign("/change-password");
-          return;
-        }
-        setError(err instanceof HttpError && err.status !== 0 ? err.message : "Can't reach the server. Check your connection and reload.");
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = (tryNumber: number) => {
+      api<{ user: SessionUser; policy: PasswordPolicy }>("GET", "/api/auth/me")
+        .then((res) => {
+          if (cancelled) return;
+          if (res.user.mustResetPassword) {
+            leaving = true;
+            window.location.assign("/change-password");
+            return;
+          }
+          setBusy(false);
+          setSession(res);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err instanceof HttpError && err.status === 401) return goToLogin();
+          if (err instanceof HttpError && err.code === "password_change_required") {
+            window.location.assign("/change-password");
+            return;
+          }
+          // The database was briefly busy (hosted Postgres ran out of connection slots). Keep trying
+          // on our own instead of making the whole shop reload the page.
+          if (err instanceof HttpError && err.code === "db_busy" && tryNumber < 4) {
+            setBusy(true);
+            timer = setTimeout(() => load(tryNumber + 1), 2000 + tryNumber * 1500);
+            return;
+          }
+          setBusy(false);
+          setError(err instanceof HttpError && err.status !== 0 ? err.message : "Can't reach the server. Check your connection and reload.");
+        });
+    };
+
+    load(0);
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [goToLogin]);
+  }, [goToLogin, attempt]);
 
   // Any request that comes back 401 / "must change password" ends up here.
   useEffect(() => {
@@ -156,9 +174,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
             {error}
           </p>
-          <button onClick={() => window.location.reload()} className="focus-ring rounded-xl px-4 py-2 text-[13px] font-semibold text-white" style={{ background: "var(--brand)" }}>
-            Reload
-          </button>
+          <div className="flex justify-center gap-2 pt-1">
+            <button
+              onClick={() => {
+                setError(null);
+                setAttempt((n) => n + 1);
+              }}
+              className="focus-ring rounded-xl px-4 py-2 text-[13px] font-semibold text-white"
+              style={{ background: "var(--brand)" }}
+            >
+              Try again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="focus-ring rounded-xl border px-4 py-2 text-[13px] font-semibold"
+              style={{ borderColor: "var(--border)", color: "var(--text)" }}
+            >
+              Reload
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -166,8 +200,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   if (!value) {
     return (
-      <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--bg)" }}>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3" style={{ background: "var(--bg)" }}>
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: "var(--brand)", borderTopColor: "transparent" }} aria-label="Loading" />
+        {busy && <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>The database is busy — retrying…</p>}
       </div>
     );
   }
