@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Plus, Printer, Eye, Pencil, Trash2, RefreshCcw, Ban, ChevronLeft, ChevronRight, X, Truck, CheckCircle2, PackageCheck } from "lucide-react";
 import { useOrders } from "@/lib/orders/store";
 import { useSettlements } from "@/lib/settlements/store";
-import { expectedSettlement } from "@/lib/settlements/compute";
 import { useToast } from "@/components/toast";
 import { useSettings } from "@/lib/settings/store";
 import { api } from "@/lib/persist/api";
@@ -37,7 +36,7 @@ type OrdersPageResponse = {
 
 function OrdersPageInner() {
   const { orders, deleteOrder, dispatchOrder, recordSteadfastBooking, markReturnReceived } = useOrders();
-  const { getRow, recordPayout, markSettled, overrides } = useSettlements();
+  const { getRow, recordPayout } = useSettlements();
   const { settings } = useSettings();
   const showToast = useToast();
   const router = useRouter();
@@ -103,16 +102,6 @@ function OrdersPageInner() {
     const r = getRow(o.id);
     if (!r) return o.delivery.settlementStatus !== "settled";
     return r.status !== "Settled" && r.pending > 0;
-  };
-
-  /**
-   * What a courier payout for this order would settle: the tracked row's pending amount, or the
-   * Settlement report's own expectation when the order isn't tracked yet. Never the full COD — a
-   * Partial Delivered order is only worth what the customer actually paid.
-   */
-  const pendingFor = (o: Order) => {
-    const r = getRow(o.id);
-    return r ? r.pending : Math.max(0, expectedSettlement(o, overrides));
   };
 
   const isSelectable = (o: Order) => isDispatchable(o) || isSettlable(o) || isMovableToTransit(o) || isReturnReceivable(o);
@@ -281,17 +270,12 @@ function OrdersPageInner() {
     try {
       // Group by courier company
       const byCourier = new Map<string, { total: number; allocations: { orderId: string; amount: number }[] }>();
-      // Orders the courier owes nothing for — there is no money to allocate, but they still have to
-      // be closeable, otherwise "Mark as Settled" leaves them stuck as Unsettled forever.
-      const nothingDue: string[] = [];
 
       for (const o of targets) {
         const courierName = o.courier.company || "Steadfast";
-        const pendingAmount = pendingFor(o);
-        if (pendingAmount <= 0) {
-          nothingDue.push(o.id);
-          continue;
-        }
+        const row = getRow(o.id);
+        const pendingAmount = row ? row.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0));
+        if (pendingAmount <= 0) continue;
 
         const cur = byCourier.get(courierName) ?? { total: 0, allocations: [] };
         cur.total += pendingAmount;
@@ -319,20 +303,10 @@ function OrdersPageInner() {
         }
       }
 
-      if (nothingDue.length) {
-        markSettled(nothingDue);
-        settledCount += nothingDue.length;
-      }
-
       setSelected(new Set());
       setConfirmBulkSettle(false);
       if (settledCount > 0) {
-        showToast(
-          nothingDue.length
-            ? `${settledCount} order(s) marked as Settled — ${nothingDue.length} of them had no amount to pay out`
-            : `${settledCount} order(s) successfully marked as Settled`,
-          "success"
-        );
+        showToast(`${settledCount} order(s) successfully marked as Settled`, "success");
       }
     } catch (e) {
       showToast((e as Error)?.message || "Failed to record bulk settlement", "error");
@@ -531,7 +505,10 @@ function OrdersPageInner() {
             )}
             {selectedSettlableOrders.length > 0 && (
               <span className="ml-2 text-[12px]" style={{ color: "var(--brand)" }}>
-                Settable: {selectedSettlableOrders.length} (Pending {formatTaka(selectedSettlableOrders.reduce((s, o) => s + pendingFor(o), 0), 2)})
+                Settable: {selectedSettlableOrders.length} (Pending {formatTaka(selectedSettlableOrders.reduce((s, o) => {
+                  const r = getRow(o.id);
+                  return s + (r ? r.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0)));
+                }, 0), 2)})
               </span>
             )}
             {selectedMovableToTransit.length > 0 && (
@@ -635,9 +612,7 @@ function OrdersPageInner() {
             <tbody>
               {pageItems.map((o) => {
                 const sRow = getRow(o.id);
-                // No settlement row → the order isn't tracked. It is still "settled" when the order
-                // itself says so, and nothing is outstanding when the courier owes nothing for it.
-                const sStatus = sRow ? sRow.status : o.delivery.settlementStatus === "settled" ? "Settled" : expectedSettlement(o, overrides) > 0 ? "Unsettled" : "Nothing due";
+                const sStatus = sRow ? sRow.status : (o.delivery.settlementStatus === "settled" ? "Settled" : "Unsettled");
                 const isFullySettled = sStatus === "Settled";
                 const isDeliveredOrPartial = o.status === "delivered" || o.status === "partial_delivered";
 
@@ -699,25 +674,15 @@ function OrdersPageInner() {
                   </td>
                   <td className="px-3 py-3">
                     {isDeliveredOrPartial ? (
-                      sStatus === "Nothing due" ? (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
-                          style={{ color: "var(--text-faint)", background: "var(--surface-2)" }}
-                          title="The courier owes nothing for this order, so there is no settlement to make"
-                        >
-                          Nothing due
-                        </span>
-                      ) : (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
-                          style={{
-                            color: isFullySettled ? "var(--green)" : sStatus === "Partially Settled" ? "var(--blue)" : "#b45309",
-                            background: isFullySettled ? "var(--green-soft)" : sStatus === "Partially Settled" ? "var(--blue-soft)" : "rgba(180, 83, 9, 0.14)",
-                          }}
-                        >
-                          {isFullySettled ? "✓ Settled" : sStatus === "Partially Settled" ? `Partial (Pending: ৳${sRow?.pending ?? 0})` : "Unsettled"}
-                        </span>
-                      )
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
+                        style={{
+                          color: isFullySettled ? "var(--green)" : sStatus === "Partially Settled" ? "var(--blue)" : "#b45309",
+                          background: isFullySettled ? "var(--green-soft)" : sStatus === "Partially Settled" ? "var(--blue-soft)" : "rgba(180, 83, 9, 0.14)",
+                        }}
+                      >
+                        {isFullySettled ? "✓ Settled" : sStatus === "Partially Settled" ? `Partial (Pending: ৳${sRow?.pending ?? 0})` : "Unsettled"}
+                      </span>
                     ) : (
                       <span className="text-[11.5px]" style={{ color: "var(--text-faint)" }}>—</span>
                     )}
@@ -811,7 +776,10 @@ function OrdersPageInner() {
       <ConfirmDialog
         open={confirmBulkSettle}
         title="Mark as Settled (Bulk)"
-        message={`Record settlement for ${selectedSettlableOrders.length} order(s) with total pending amount of ${formatTaka(selectedSettlableOrders.reduce((s, o) => s + pendingFor(o), 0), 2)}? These orders will be marked as Settled and cannot be settled again.`}
+        message={`Record settlement for ${selectedSettlableOrders.length} order(s) with total pending amount of ${formatTaka(selectedSettlableOrders.reduce((s, o) => {
+          const r = getRow(o.id);
+          return s + (r ? r.pending : Math.max(0, (o.delivery.customerPaid || expectedCod(o)) - (o.courier.forwardCost || 0)));
+        }, 0), 2)}? These orders will be marked as Settled and cannot be settled again.`}
         confirmLabel="Confirm Settlement"
         onCancel={() => setConfirmBulkSettle(false)}
         onConfirm={handleBulkSettlement}

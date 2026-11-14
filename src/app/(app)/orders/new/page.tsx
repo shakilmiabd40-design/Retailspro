@@ -12,7 +12,7 @@ import { availableStock, formatTaka } from "@/lib/products/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { parseContactDetails } from "@/lib/orders/contact-details";
 import { productSubtotal, totalDiscount } from "@/lib/orders/utils";
-import type { Order, OrderItem, OrderSource } from "@/lib/orders/types";
+import type { Order, OrderItem } from "@/lib/orders/types";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
@@ -48,8 +48,6 @@ export default function CreateOrderPage() {
   // Whenever the customer is charged ৳0 for delivery, the courier still bills the shop for it — this
   // records that real charge as a loss instead of silently assuming it was ৳0 too.
   const [courierEstimate, setCourierEstimate] = useState(0);
-  const [orderSource, setOrderSource] = useState<"" | OrderSource>("");
-  const [campaign, setCampaign] = useState("");
 
   // Exchange: raised against an already-delivered order. Credit = value of the goods coming back.
   const [exchangeOriginal, setExchangeOriginal] = useState<Order | null>(null);
@@ -155,10 +153,6 @@ export default function CreateOrderPage() {
       showToast("Customer name, phone and address are required", "error");
       return;
     }
-    if (!orderSource) {
-      showToast("Choose where this order came from so channel reports stay accurate", "error");
-      return;
-    }
     if (!items.length) {
       showToast("Add at least one product", "error");
       return;
@@ -173,14 +167,9 @@ export default function CreateOrderPage() {
       notes: notes || undefined,
       deliveryCharge,
       orderDiscount,
-      source: orderSource,
-      utm: campaign.trim() ? { campaign: campaign.trim(), source: orderSource } : undefined,
       freeDeliveryCourierCost: deliveryCharge === 0 ? courierEstimate : undefined,
       ...(exchangeOriginal ? { exchange: { originalOrderId: exchangeOriginal.id, credit: creditApplied } } : {}),
-      items: items.map(({ id: _id, ...rest }) => {
-        void _id;
-        return rest;
-      }),
+      items: items.map(({ id: _id, ...rest }) => rest),
     });
     if (!result.ok) {
       showToast(result.error, "error");
@@ -261,29 +250,6 @@ export default function CreateOrderPage() {
           Customer Information
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Order Source" required>
-            <select
-              value={orderSource}
-              onChange={(e) => setOrderSource(e.target.value as "" | OrderSource)}
-              className={inputClass}
-              style={inputStyle}
-            >
-              <option value="">Select source…</option>
-              <option value="facebook">Facebook (Messenger / Post)</option>
-              <option value="instagram">Instagram (DM / Post)</option>
-              <option value="website">Website</option>
-              <option value="shop">Walk-in Shop</option>
-            </select>
-          </Field>
-          <Field label="Campaign / Ad Tag (optional)">
-            <input
-              value={campaign}
-              onChange={(e) => setCampaign(e.target.value)}
-              placeholder="e.g. Eid_Sneaker_Campaign"
-              className={inputClass}
-              style={inputStyle}
-            />
-          </Field>
           <Field label="Customer Name" required>
             <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputClass} style={inputStyle} />
           </Field>
