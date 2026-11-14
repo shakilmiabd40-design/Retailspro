@@ -30,5 +30,7 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "prisma.config.ts"]
+  // "New folder" guards against a stray uploaded snapshot of src/ landing in the repo
+  // root: tsconfig's include glob would otherwise typecheck it and fail the build.
+  "exclude": ["node_modules", "prisma.config.ts", "New folder"]
 }

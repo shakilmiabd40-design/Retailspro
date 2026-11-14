@@ -48,3 +48,9 @@ next-env.d.ts
 
 # Database backups (contain password hashes and session tokens)
 backups/
+
+# Guard: a stray "New folder" snapshot of src/ was uploaded into the repo root on
+# 2026-11-14. It duplicated files that are already tracked (commit 8da7b0f) and broke
+# `tsc --noEmit`. If one is uploaded again, do not commit it — merge the real changes
+# into the tracked files instead.
+New folder/
