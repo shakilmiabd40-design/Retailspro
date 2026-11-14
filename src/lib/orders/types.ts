@@ -7,6 +7,27 @@ export type OrderStatus =
   | "refuse_return"
   | "cancelled";
 
+export type OrderSource = "website" | "facebook" | "instagram" | "shop" | "pos" | "api";
+
+export interface OrderUtm {
+  source?: string;
+  medium?: string;
+  campaign?: string;
+  adSet?: string;
+  ad?: string;
+}
+
+export type RefusalReason =
+  | "wrong_size"
+  | "defect"
+  | "not_as_shown"
+  | "customer_refused"
+  | "unreachable"
+  | "fake_order"
+  | "delayed_delivery"
+  | "other"
+  | (string & {});
+
 export type KnownCancelReason =
   | "customer_changed_mind"
   | "wrong_order"
@@ -42,6 +63,7 @@ export interface CourierInfo {
   forwardCost: number;
   returnCost: number;
   otherCost: number;
+  codFee?: number;
   /** Raw status Steadfast last reported for this consignment (e.g. "in_review", "partial_delivered"). */
   status?: string;
 }
@@ -64,6 +86,7 @@ export interface CancellationInfo {
   cancelledAt?: string;
   cancelledBy?: string;
   reason?: CancelReason;
+  refusalReason?: RefusalReason;
   notes?: string;
 }
 
@@ -109,11 +132,12 @@ export interface Order {
   deliveryCharge: number;
 
   /** Set when the order was created from the POS (delivery sale). */
-  source?: "pos" | "api";
+  source?: OrderSource;
   posInvoiceId?: string;
   posInvoiceNumber?: string;
   /** Set when the order came in through the public API (e.g. from the online store). */
   channel?: string;
+  utm?: OrderUtm;
   /** The other system's own order id — unique per channel, used to make retries safe. */
   externalId?: string;
 

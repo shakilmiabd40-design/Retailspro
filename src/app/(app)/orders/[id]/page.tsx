@@ -125,7 +125,7 @@ export default function OrderDetailsPage() {
               #{order.orderNumber}
             </h1>
             <OrderStatusBadge status={order.status} />
-            {order.source === "pos" && order.posInvoiceId && (
+            {order.posInvoiceId && (
               <Link href={`/pos/sales/${order.posInvoiceId}`} className="rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold" style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}>
                 POS · {order.posInvoiceNumber}
               </Link>

@@ -19,6 +19,8 @@ import type {
   Order,
   OrderExchange,
   OrderItem,
+  OrderSource,
+  OrderUtm,
   OrderStatus,
   ReturnInfo,
   SettlementStatus,
@@ -46,6 +48,10 @@ export type NewOrderInput = {
   pos?: { invoiceId: string; invoiceNumber: string };
   /** Exchange for a delivered order: its id, and the value of the goods coming back (credited against the COD). */
   exchange?: { originalOrderId: string; credit: number };
+  /** Where the order came from (channel attribution); "pos" for walk-in POS sales. */
+  source?: OrderSource;
+  /** Campaign parameters from the storefront, used by the channel reports. */
+  utm?: OrderUtm;
 };
 
 export type DispatchInput = {
@@ -253,7 +259,10 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       items: foldOrderDiscount(input.items, orderDiscount).map((i) => ({ ...i, id: crypto.randomUUID() })),
       deliveryCharge: input.deliveryCharge,
       ...(exchangeInfo ? { exchange: exchangeInfo } : {}),
-      ...(input.pos ? { source: "pos" as const, posInvoiceId: input.pos.invoiceId, posInvoiceNumber: input.pos.invoiceNumber } : {}),
+      // Channel attribution: an explicit source wins; walk-in POS sales are "shop".
+      source: input.source ?? (input.pos ? "shop" : undefined),
+      utm: input.utm,
+      ...(input.pos ? { posInvoiceId: input.pos.invoiceId, posInvoiceNumber: input.pos.invoiceNumber } : {}),
       courier: { company: "", trackingId: "", forwardCost: freeDeliveryCourierCost, returnCost: 0, otherCost: 0 },
       delivery: { customerPaid: 0 },
       returnInfo: { returnRequired: false, returnReceived: false },
