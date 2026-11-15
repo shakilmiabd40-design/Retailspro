@@ -3,7 +3,7 @@
 // strings and the types of the amount fields, so these pin down the normalisation the webhook relies on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
+import { mapSteadfastStatus, normalizeSteadfastStatus, readCourierPaidAmount, readDeliveryCharge, readAmountChangedMessage, readLatestRiderTrackingMessage, readPaidAmount, readRiderNoteAmount, toAmount } from "./steadfast-status";
 
 test("status strings are normalised regardless of case, spaces or hyphens", () => {
   assert.equal(normalizeSteadfastStatus("  Partial Delivered "), "partial_delivered");
@@ -86,12 +86,14 @@ test("partial-delivery rider note supplies collected amount when COD is absent o
   assert.equal(readRiderNoteAmount(message), 100);
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", tracking_message: message }), 100);
   assert.equal(readCourierPaidAmount({ status: "partial_delivered", cod_amount: 2490, tracking_message: message }), 100);
-  assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 100);
+  // A Steadfast COD change (values.cod_amount) wins over the rider note.
+  assert.equal(readCourierPaidAmount({ values: { cod_amount: 80 }, tracking_message: message }), 80);
 });
 
-test("an explicit rider-note amount wins over a stale COD change while an explicit collected amount wins over the note", () => {
+test("a Steadfast COD change wins over the rider note, and an explicit collected amount wins over both", () => {
   const message = 'Delivered. Note: Rider Note: "2450 tk hobe refar by marchant"';
-  assert.equal(readCourierPaidAmount({ status: "delivered", values: { cod_amount: 2490 }, tracking_message: message }), 2450);
+  assert.equal(readCourierPaidAmount({ status: "delivered", values: { cod_amount: 2490 }, tracking_message: message }), 2490);
+  assert.equal(readCourierPaidAmount({ status: "delivered", tracking_message: message }), 2450);
   assert.equal(readCourierPaidAmount({ status: "delivered", values: { collected_amount: 2460, cod_amount: 2490 }, tracking_message: message }), 2460);
 });
 
@@ -107,4 +109,32 @@ test("tracking history selects the newest rider-note entry for manual partial-de
   };
   assert.equal(readLatestRiderTrackingMessage(history), latest);
   assert.equal(readCourierPaidAmount({ tracking_message: readLatestRiderTrackingMessage(history) }), 100);
+});
+
+test("ORD-11251: 'by rider. Note: ৮০ টাকা দিয়ে রিটার্ন' gives 80 and a full-COD push no longer wins", () => {
+  const message = "Consignment marked as partially delivered by rider. Note: ৮০ টাকা দিয়ে রিটার্ন";
+  assert.equal(readRiderNoteAmount(message), 80);
+  assert.equal(readCourierPaidAmount({ status: "partial_delivered", cod_amount: 2390, tracking_message: message }), 80);
+});
+
+test("ORD-11251: 'Amount has been changed from \"2390\" to \"80\"' reads the new amount", () => {
+  const message = 'Amount has been changed from "2390" to "80"';
+  assert.equal(readAmountChangedMessage(message), 80);
+  assert.equal(readAmountChangedMessage("Amount has been changed from 1,200 to 1,150.50"), 1150.5);
+  assert.equal(readAmountChangedMessage("Return label printed (1 sticker)"), null);
+  // tracking_update carrying only the message, no cod field
+  assert.equal(readCourierPaidAmount({ notification_type: "tracking_update", tracking_message: message }), 80);
+  // and it beats a rider note
+  assert.equal(readCourierPaidAmount({ tracking_message: message, values: { tracking_message: message } }), 80);
+});
+
+test("tracking history: the newest Steadfast COD change beats a rider note", () => {
+  const history = { tracking: [
+    { text: "Consignment marked as partially delivered by rider. Note: ৮০ টাকা দিয়ে রিটার্ন", created_at: "2026-11-15T05:24:00Z" },
+    { text: 'Amount has been changed from "2390" to "80"', created_at: "2026-11-15T06:22:00Z" },
+    { text: "Included in rider account submission #11430578.", created_at: "2026-11-15T06:58:00Z" },
+  ] };
+  assert.equal(readLatestRiderTrackingMessage(history), 'Amount has been changed from "2390" to "80"');
+  const noChange = { tracking: [{ text: "Consignment marked as partially delivered by rider. Note: ৮০ টাকা দিয়ে রিটার্ন", created_at: "2026-11-15T05:24:00Z" }] };
+  assert.equal(readCourierPaidAmount({ tracking_message: readLatestRiderTrackingMessage(noChange) }), 80);
 });

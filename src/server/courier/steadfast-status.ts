@@ -147,44 +147,67 @@ const BENGALI_DIGITS: Record<string, string> = { "০": "0", "১": "1", "২": 
 /** Read an explicit taka amount from the rider's note, including Bengali numerals. */
 export function readRiderNoteAmount(raw: unknown): number | null {
   if (typeof raw !== "string") return null;
-  const noteMarker = /rider\s*note|রাইডার\s*নোট/i.exec(raw);
+  // Steadfast writes either `Rider Note: "..."` or `... marked as partially delivered by rider. Note: ৮০ টাকা ...`.
+  const noteMarker = /rider\s*note|রাইডার\s*নোট|\bnote\s*[:：]/i.exec(raw);
   if (!noteMarker) return null;
   const note = raw.slice(noteMarker.index + noteMarker[0].length).replace(/[০-৯]/g, (digit) => BENGALI_DIGITS[digit]);
   const amount = /(?:৳\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:টাকা|taka\b|tk\b|bdt\b))/i.exec(note);
   return toAmount(amount?.[1] ?? amount?.[2]);
 }
 
-/** Pick the newest tracking-history message containing a rider note. */
+/**
+ * Steadfast logs a COD revision as `Amount has been changed from "2390" to "80"`. Returns the NEW amount
+ * (80). The webhook for it can arrive as a tracking_update carrying only this message, with no cod field.
+ */
+export function readAmountChangedMessage(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const m = /amount\s+has\s+been\s+changed\s+from\s*["'“”]?\s*[\d,]+(?:\.\d+)?\s*["'“”]?\s*to\s*["'“”]?\s*([\d,]+(?:\.\d+)?)/i.exec(raw);
+  return m ? toAmount(m[1].replace(/,/g, "")) : null;
+}
+
+/**
+ * Picks the tracking-history message to read the paid amount from. A Steadfast COD change
+ * (`Amount has been changed from … to …`) wins; with none, the newest rider note with a taka amount.
+ */
 export function readLatestRiderTrackingMessage(raw: unknown): string | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const body = raw as Record<string, unknown>;
   const data = body.data && typeof body.data === "object" && !Array.isArray(body.data) ? body.data as Record<string, unknown> : null;
   const records = Array.isArray(body.tracking) ? body.tracking : Array.isArray(data?.tracking) ? data.tracking : Array.isArray(body.data) ? body.data : [];
-  const notes = records.flatMap((item, index) => {
+  const entries = records.flatMap((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const record = item as Record<string, unknown>;
     const message = typeof record.text === "string" ? record.text : typeof record.tracking_message === "string" ? record.tracking_message : "";
-    if (readRiderNoteAmount(message) === null) return [];
     const date = Date.parse(String(record.created_at ?? record.updated_at ?? ""));
     return [{ message, index, date: Number.isFinite(date) ? date : null }];
   });
-  notes.sort((a, b) => a.date !== null && b.date !== null ? a.date - b.date || a.index - b.index : a.index - b.index);
-  return notes.at(-1)?.message ?? null;
+  const newest = (list: typeof entries) => {
+    list.sort((a, b) => a.date !== null && b.date !== null ? a.date - b.date || a.index - b.index : a.index - b.index);
+    return list.at(-1)?.message ?? null;
+  };
+  return newest(entries.filter((e) => readAmountChangedMessage(e.message) !== null)) ?? newest(entries.filter((e) => readRiderNoteAmount(e.message) !== null));
 }
 
-/** Prefer explicit collected figures, then an explicit rider-note taka amount, then COD fields. */
+/**
+ * What the customer paid, in priority order:
+ *   1. an explicit collected/paid field,
+ *   2. a Steadfast COD change — `Amount has been changed from … to …`, or the changed `cod_amount` in
+ *      a `consignment_update`'s `values`,
+ *   3. the rider note's taka amount (fallback when Steadfast sends no COD change),
+ *   4. the plain COD fields on the consignment / event.
+ */
 export function readCourierPaidAmount(event: Record<string, unknown> | null | undefined, consignment?: Record<string, unknown> | null): number | null {
   const values = event?.values && typeof event.values === "object" && !Array.isArray(event.values)
     ? event.values as Record<string, unknown>
     : null;
   const trackingMessage = values?.tracking_message ?? event?.tracking_message ?? consignment?.tracking_message;
-  // `consignment_update` carries changed fields in `values`; prefer those over any stale
-  // top-level COD value included alongside the change metadata.
   const collected = readExplicitCollectedAmount(values) ?? readExplicitCollectedAmount(consignment) ?? readExplicitCollectedAmount(event);
   if (collected !== null) return collected;
-  const riderNote = readRiderNoteAmount(trackingMessage);
-  if (riderNote !== null) return riderNote;
+  const changed = readAmountChangedMessage(trackingMessage);
+  if (changed !== null) return changed;
   const changedCod = readPaidAmount(values);
   if (changedCod !== null) return changedCod;
+  const riderNote = readRiderNoteAmount(trackingMessage);
+  if (riderNote !== null) return riderNote;
   return readPaidAmount(consignment) ?? readPaidAmount(event);
 }
