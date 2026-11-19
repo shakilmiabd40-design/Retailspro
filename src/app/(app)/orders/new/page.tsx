@@ -3,16 +3,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Search, Trash2, Package } from "lucide-react";
+import { ArrowLeft, Search, Trash2, Package, X } from "lucide-react";
 import { useProducts } from "@/lib/products/store";
 import { useSettings } from "@/lib/settings/store";
 import { useOrders } from "@/lib/orders/store";
 import { useToast } from "@/components/toast";
-import { availableStock, formatTaka } from "@/lib/products/utils";
+import { formatTaka } from "@/lib/products/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { parseContactDetails } from "@/lib/orders/contact-details";
 import { productSubtotal, totalDiscount } from "@/lib/orders/utils";
+import { availableToAdd } from "@/lib/pos/use-cart";
+import { OrderProductPicker } from "@/components/orders/order-product-picker";
+import { useOrderProductBrowser } from "@/components/orders/use-product-browser";
 import type { Order, OrderItem, OrderSource } from "@/lib/orders/types";
+import type { Product, Variant } from "@/lib/products/types";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
@@ -83,56 +87,22 @@ export default function CreateOrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders]);
 
-  const [productQuery, setProductQuery] = useState("");
-  const [pickerProductId, setPickerProductId] = useState<string | null>(null);
-  const [qtyDraft, setQtyDraft] = useState<Record<string, number>>({});
   const [items, setItems] = useState<OrderItem[]>([]);
+  const pb = useOrderProductBrowser(setItems);
+  const [browserOpen, setBrowserOpen] = useState(false);
 
-  const productResults = useMemo(() => {
-    const q = productQuery.trim().toLowerCase();
-    if (!q) return [];
-    const filtered = products.filter((p) => p.status === "active" && (p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)));
+  // The picker's stock display always reflects the items table (adds, qty edits and removals).
+  useEffect(() => pb.syncToItems(items), [items, pb.syncToItems]);
 
-    // Limit to 4 items on mobile, 6 items on desktop
-    // We use a CSS-based approach for the actual visibility,
-    // but for the data array, we slice to the maximum possible (6).
-    return filtered.slice(0, 6);
-  }, [productQuery, products]);
-
-  const pickerProduct = products.find((p) => p.id === pickerProductId);
-
-  function addItem(variantId: string) {
-    const product = pickerProduct;
-    const variant = product?.variants.find((v) => v.id === variantId);
-    if (!product || !variant) return;
-    const qty = qtyDraft[variantId] || 1;
-    const available = availableStock(variant);
+  function addItem(product: Product, variant: Variant, qty: number) {
+    const available = availableToAdd(pb.draft, variant);
     if (qty > available) {
       showToast(`Only ${available} available for ${product.name} (${variant.color}/${variant.size})`, "error");
       return;
     }
-    setItems((prev) => {
-      const existing = prev.find((i) => i.variantId === variantId);
-      if (existing) {
-        return prev.map((i) => (i.variantId === variantId ? { ...i, qty: i.qty + qty } : i));
-      }
-      return [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          productId: product.id,
-          productName: product.name,
-          variantId: variant.id,
-          color: variant.color,
-          size: variant.size,
-          sku: variant.sku,
-          price: variant.price,
-          qty,
-          discount: 0,
-        },
-      ];
-    });
+    pb.add(product, variant, qty);
     showToast(`Added ${product.name} (${variant.color}/${variant.size})`);
+    setBrowserOpen(false);
   }
 
   function removeItem(id: string) {
@@ -391,115 +361,35 @@ export default function CreateOrderPage() {
 
       {/* Section B — Products */}
       <section className="card space-y-4 p-5">
-        <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
-          Products
-        </p>
-
-        <div className="relative">
-          <label className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)" }}>
-            <Search size={15} style={{ color: "var(--text-faint)" }} />
-            <input
-              value={productQuery}
-              onChange={(e) => setProductQuery(e.target.value)}
-              placeholder="Search product by name or SKU..."
-              className="w-full bg-transparent text-[13px] outline-none"
-              style={{ color: "var(--text)" }}
-            />
-          </label>
-          {productResults.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full divide-y overflow-hidden rounded-xl border shadow-lg" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-              {productResults.map((p, index) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => {
-                    setPickerProductId(p.id);
-                    setProductQuery("");
-                  }}
-                  className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-2)] ${index >= 4 ? "hidden sm:flex" : "flex"}`}
-                >
-                  <span>
-                    <span className="block text-[13px] font-medium" style={{ color: "var(--text)" }}>
-                      {p.name}
-                    </span>
-                    <span className="block text-[11.5px]" style={{ color: "var(--text-faint)" }}>
-                      {p.sku} · {formatTaka(p.sellingPrice, 2)}
-                    </span>
-                  </span>
-                  <span className="text-[12px] font-medium" style={{ color: "var(--brand)" }}>
-                    Select
-                  </span>
-                </button>
-              ))}
-            </div>
+        <div className="flex items-center justify-between">
+          <p className="text-[14px] font-semibold" style={{ color: "var(--text)" }}>
+            Products
+          </p>
+          {!browserOpen && (
+            <button
+              type="button"
+              onClick={() => setBrowserOpen(true)}
+              className="focus-ring rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium"
+              style={{ background: "var(--brand-soft)", color: "var(--brand-strong)" }}
+            >
+              + Add Product
+            </button>
           )}
         </div>
 
-        {pickerProduct && (
-          <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[13px] font-medium" style={{ color: "var(--text)" }}>
-                {pickerProduct.name} — pick a variant
-              </p>
-              <button type="button" onClick={() => setPickerProductId(null)} className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-                Close
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] border-collapse text-left text-[12.5px]">
-                <thead>
-                  <tr style={{ color: "var(--text-faint)" }}>
-                    <th className="py-1.5 font-medium">Color</th>
-                    <th className="py-1.5 font-medium">Size</th>
-                    <th className="py-1.5 font-medium">Available</th>
-                    <th className="py-1.5 font-medium">Qty</th>
-                    <th className="py-1.5" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {pickerProduct.variants.map((v) => {
-                    const available = availableStock(v);
-                    return (
-                      <tr key={v.id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                        <td className="py-1.5" style={{ color: "var(--text)" }}>
-                          {v.color}
-                        </td>
-                        <td className="py-1.5" style={{ color: "var(--text-muted)" }}>
-                          {v.size}
-                        </td>
-                        <td className="py-1.5" style={{ color: available > 0 ? "var(--text-muted)" : "var(--red)" }}>
-                          {available}
-                        </td>
-                        <td className="py-1.5">
-                          <input
-                            type="number"
-                            min={1}
-                            max={Math.max(1, available)}
-                            disabled={available <= 0}
-                            value={qtyDraft[v.id] ?? 1}
-                            onChange={(e) => setQtyDraft((prev) => ({ ...prev, [v.id]: Number(e.target.value) }))}
-                            className="w-16 rounded-lg border px-2 py-1"
-                            style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
-                          />
-                        </td>
-                        <td className="py-1.5 text-right">
-                          <button
-                            type="button"
-                            disabled={available <= 0}
-                            onClick={() => addItem(v.id)}
-                            className="focus-ring rounded-lg px-3 py-1 text-[12px] font-semibold text-white disabled:opacity-40"
-                            style={{ background: "var(--brand)" }}
-                          >
-                            Add
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        {browserOpen && (
+          <div className="relative">
+            <OrderProductPicker products={products} draft={pb.draft} searchRef={pb.searchRef} onAdd={addItem} />
+            <button type="button" aria-label="Close product search" onClick={() => setBrowserOpen(false)} className="absolute right-3 top-3 z-20 rounded-md p-1" style={{ color: "var(--text-faint)" }}>
+              <X size={16} />
+            </button>
           </div>
+        )}
+
+        {!browserOpen && items.length === 0 && (
+          <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+            No products yet — search and add some.
+          </p>
         )}
 
         {items.length > 0 ? (
@@ -519,8 +409,25 @@ export default function CreateOrderPage() {
               <tbody>
                 {items.map((i) => (
                   <tr key={i.id} className="border-t" style={{ borderColor: "var(--border-soft)" }}>
-                    <td className="px-3 py-2 font-medium" style={{ color: "var(--text)" }}>
-                      {i.productName}
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg" style={{ background: "var(--surface-2)" }}>
+                          {products.find((p) => p.id === i.productId)?.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={products.find((p) => p.id === i.productId)?.imageUrl}
+                              alt={i.productName}
+                              className="h-full w-full object-cover"
+                              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                            />
+                          ) : (
+                            <Package size={16} style={{ color: "var(--text-faint)" }} />
+                          )}
+                        </div>
+                        <span className="font-medium" style={{ color: "var(--text)" }}>
+                          {i.productName}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>
                       {i.color} / {i.size}

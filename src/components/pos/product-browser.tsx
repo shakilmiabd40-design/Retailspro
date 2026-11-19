@@ -23,9 +23,21 @@ interface Props {
   onViewChange: (v: BrowserView) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   onAdd: (product: Product, variant: Variant, qty: number) => void;
+  /** Orders picker passes 4 so cards are always four per row; POS keeps its default 3-column layout. */
+  columns?: 3 | 4;
 }
 
 const activeVariants = (p: Product) => p.variants.filter((v) => v.status === "active");
+
+/** Shows the actual product photo; falls back to a package icon if the URL is missing or broken. */
+function ProductImage({ product, className, iconSize }: { product: Product; className: string; iconSize: number }) {
+  const [failed, setFailed] = useState(false);
+  if (!product.imageUrl || failed) return <Package size={iconSize} style={{ color: "var(--text-faint)" }} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={product.imageUrl} alt={product.name} className={className} onError={() => setFailed(true)} />
+  );
+}
 
 function beep() {
   try {
@@ -45,7 +57,7 @@ function beep() {
   }
 }
 
-export function ProductBrowser({ products, draft, scanEnabled, beepOnScan, captureKeys, view, onViewChange, searchRef, onAdd }: Props) {
+export function ProductBrowser({ products, draft, scanEnabled, beepOnScan, captureKeys, view, onViewChange, searchRef, onAdd, columns = 3 }: Props) {
   const toast = useToast();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("All");
@@ -190,7 +202,7 @@ export function ProductBrowser({ products, draft, scanEnabled, beepOnScan, captu
             {sellable.length === 0 ? "No active products yet — add some under Products." : "No products match."}
           </div>
         ) : view === "grid" ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4">
+          <div className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-3", columns === 4 ? "lg:grid-cols-4" : "xl:grid-cols-3 2xl:grid-cols-4")}>
             {results.slice(0, limit).map((p) => {
               const avail = totalAvail(p);
               return (
@@ -200,13 +212,8 @@ export function ProductBrowser({ products, draft, scanEnabled, beepOnScan, captu
                   onClick={() => open(p)}
                   className={clsx("focus-ring card flex flex-col overflow-hidden text-left transition-shadow hover:shadow-md", avail < 1 && "cursor-not-allowed opacity-50")}
                 >
-                  <div className="flex h-24 items-center justify-center" style={{ background: "var(--surface-2)" }}>
-                    {p.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <Package size={26} style={{ color: "var(--text-faint)" }} />
-                    )}
+                  <div className="flex h-24 items-center justify-center overflow-hidden" style={{ background: "var(--surface-2)" }}>
+                    <ProductImage product={p} className="h-full w-full object-cover" iconSize={26} />
                   </div>
                   <div className="flex flex-1 flex-col gap-1 p-2.5">
                     <p className="line-clamp-2 text-[12.5px] font-semibold leading-snug" style={{ color: "var(--text)" }}>
@@ -236,12 +243,7 @@ export function ProductBrowser({ products, draft, scanEnabled, beepOnScan, captu
                   style={{ borderColor: "var(--border-soft)" }}
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg" style={{ background: "var(--surface-2)" }}>
-                    {p.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <Package size={16} style={{ color: "var(--text-faint)" }} />
-                    )}
+                    <ProductImage product={p} className="h-full w-full object-cover" iconSize={16} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold" style={{ color: "var(--text)" }}>

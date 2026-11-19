@@ -27,14 +27,14 @@ export interface OrderProductBrowser {
  * mirrors the local `items` state. Picks flow through `add`; local edits flow through `syncToItems`.
  */
 export function useOrderProductBrowser(setItems: React.Dispatch<React.SetStateAction<OrderItem[]>>): OrderProductBrowser {
-  const posCart = useCart(POS_CART_OPTS);
+  const { draft, replace } = useCart(POS_CART_OPTS);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const syncToItems = useCallback(
     (items: OrderItem[]) => {
-      posCart.replace({ ...emptyDraft(), lines: items.map((i) => ({ key: i.id, variantId: i.variantId, qty: i.qty }) as PBBrowserLine) });
+      replace({ ...emptyDraft(), lines: items.map((i) => ({ key: i.id, variantId: i.variantId, qty: i.qty }) as PBBrowserLine) });
     },
-    [posCart]
+    [replace]
   );
 
   const add = useCallback(
@@ -65,5 +65,5 @@ export function useOrderProductBrowser(setItems: React.Dispatch<React.SetStateAc
     [setItems]
   );
 
-  return { draft: posCart.draft, searchRef, syncToItems, add };
+  return { draft, searchRef, syncToItems, add };
 }

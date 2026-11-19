@@ -11,12 +11,10 @@ import { availableStock, formatTaka } from "@/lib/products/utils";
 import { cancelReasonLabel, ORDER_STATUS_LABELS } from "@/lib/orders/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { useSettings } from "@/lib/settings/store";
-import { ProductBrowser } from "@/components/pos/product-browser";
+import { OrderProductPicker } from "@/components/orders/order-product-picker";
 import { useOrderProductBrowser } from "@/components/orders/use-product-browser";
 import type { CancelReason, Order, OrderItem, OrderStatus, SettlementStatus } from "@/lib/orders/types";
 import type { Product, Variant } from "@/lib/products/types";
-import type { SaleDraft } from "@/lib/pos/types";
-import type { RefObject } from "react";
 
 const inputStyle = { borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" };
 const inputClass = "focus-ring w-full rounded-xl border px-3 py-2 text-[13px]";
@@ -286,7 +284,7 @@ export function OrderEditForm({ order }: { order: Order }) {
 
         {browserOpen && (
           <div className="relative">
-            <ProductPicker products={products} draft={pb.draft} searchRef={pb.searchRef} onAdd={addItem} />
+            <OrderProductPicker products={products} draft={pb.draft} searchRef={pb.searchRef} onAdd={addItem} />
             <button type="button" aria-label="Close product search" onClick={() => setBrowserOpen(false)} className="absolute right-3 top-3 z-20 rounded-md p-1" style={{ color: "var(--text-faint)" }}>
               <X size={16} />
             </button>
@@ -461,26 +459,6 @@ function SummaryRow({ label, value, muted }: { label: string; value: string; mut
     <div className="flex items-center justify-between text-[13px]">
       <span style={{ color: "var(--text-muted)" }}>{label}</span>
       <span style={{ color: muted ? "var(--text-muted)" : "var(--text)" }}>{value}</span>
-    </div>
-  );
-}
-
-/** Product search for the Orders module — reuses the POS ProductBrowser: search by name/SKU, 4 items per row,
- *  images always shown, so a product can never be selected while blank. */
-function ProductPicker({ products, draft, searchRef, onAdd }: { products: Product[]; draft: SaleDraft; searchRef: RefObject<HTMLInputElement | null>; onAdd: (p: Product, v: Variant, qty: number) => void }) {
-  return (
-    <div className="relative mx-auto max-h-[70vh] overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)" }}>
-      <ProductBrowser
-        products={products}
-        draft={draft}
-        scanEnabled={false}
-        beepOnScan={false}
-        captureKeys={false}
-        view="grid"
-        onViewChange={() => {}}
-        searchRef={searchRef}
-        onAdd={onAdd}
-      />
     </div>
   );
 }
