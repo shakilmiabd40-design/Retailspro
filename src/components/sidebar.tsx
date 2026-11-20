@@ -178,6 +178,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         { label: "Cancelled", href: "/orders?status=cancelled", icon: Ban, count: orderCounts.cancelled ?? 0 },
       ],
     },
+    { label: "Customers", icon: Users, href: "/customers", matchPrefix: "/customers", perm: { module: "orders", action: "view" } },
     {
       label: "Accounting",
       icon: Calculator,

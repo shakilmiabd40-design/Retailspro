@@ -11,6 +11,7 @@ import { availableStock, formatTaka } from "@/lib/products/utils";
 import { cancelReasonLabel, ORDER_STATUS_LABELS } from "@/lib/orders/utils";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { useSettings } from "@/lib/settings/store";
+import { CustomerHistoryWarning } from "@/components/orders/customer-history-warning";
 import { OrderProductPicker } from "@/components/orders/order-product-picker";
 import { useOrderProductBrowser } from "@/components/orders/use-product-browser";
 import type { CancelReason, Order, OrderItem, OrderStatus, SettlementStatus } from "@/lib/orders/types";
@@ -242,9 +243,12 @@ export function OrderEditForm({ order }: { order: Order }) {
           <Field label="Customer Name" required>
             <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputClass} style={inputStyle} />
           </Field>
-          <Field label="Phone" required>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} style={inputStyle} />
-          </Field>
+          <div>
+            <Field label="Phone" required>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} style={inputStyle} />
+            </Field>
+            <CustomerHistoryWarning phone={phone} excludeOrderId={order.id} />
+          </div>
           <Field label="Alternative Phone">
             <input value={altPhone} onChange={(e) => setAltPhone(e.target.value)} className={inputClass} style={inputStyle} />
           </Field>

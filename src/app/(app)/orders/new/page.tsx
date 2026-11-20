@@ -13,6 +13,7 @@ import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { parseContactDetails } from "@/lib/orders/contact-details";
 import { productSubtotal, totalDiscount } from "@/lib/orders/utils";
 import { availableToAdd } from "@/lib/pos/use-cart";
+import { CustomerHistoryWarning } from "@/components/orders/customer-history-warning";
 import { OrderProductPicker } from "@/components/orders/order-product-picker";
 import { useOrderProductBrowser } from "@/components/orders/use-product-browser";
 import type { Order, OrderItem, OrderSource } from "@/lib/orders/types";
@@ -257,9 +258,12 @@ export default function CreateOrderPage() {
           <Field label="Customer Name" required>
             <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputClass} style={inputStyle} />
           </Field>
-          <Field label="Phone" required>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" className={inputClass} style={inputStyle} />
-          </Field>
+          <div>
+            <Field label="Phone" required>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" className={inputClass} style={inputStyle} />
+            </Field>
+            <CustomerHistoryWarning phone={phone} />
+          </div>
           <Field label="Alternative Phone">
             <input value={altPhone} onChange={(e) => setAltPhone(e.target.value)} className={inputClass} style={inputStyle} />
           </Field>
