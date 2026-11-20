@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LookupOrder } from "@/lib/customers/types";
-import { aggregateCustomerHistory, emptyCustomerLookup } from "./lookup";
+import { aggregateCustomerHistory, emptyCustomerLookup, mapPosHistoryRows } from "./lookup";
 
 const order = (over: Partial<LookupOrder> = {}): LookupOrder => ({
   id: "o1",
@@ -47,6 +47,28 @@ test("mixed statuses count, rank active orders and sum only delivered totals", (
   assert.equal(result.lifetimeDelivered, 150.5);
   assert.equal(result.lastRefusalReason, "wrong_size");
   assert.equal(result.lastRefusal?.orderNumber, "ORD-1003");
+});
+
+test("POS sales and returns join the same warning totals", () => {
+  const posRows = [
+    { id: "inv1", order_number: "INV-1001", status: "completed", created_at: "2026-11-10T10:00:00.000Z", total: "750.25", refusal_reason: null },
+    { id: "ret1", order_number: "RET-1001", status: "return", created_at: "2026-11-11T10:00:00.000Z", total: "0", refusal_reason: "wrong_size" },
+  ];
+  assert.deepEqual(mapPosHistoryRows(posRows), [
+    order({ id: "inv1", orderNumber: "INV-1001", status: "delivered", createdAt: "2026-11-10T10:00:00.000Z", total: 750.25, refusalReason: null }),
+    order({ id: "ret1", orderNumber: "RET-1001", status: "refuse_return", createdAt: "2026-11-11T10:00:00.000Z", total: 0, refusalReason: "wrong_size" }),
+  ]);
+
+  const result = aggregateCustomerHistory([
+    order({ id: "o1", orderNumber: "ORD-1001", total: 100 }),
+    ...mapPosHistoryRows(posRows),
+  ]);
+  assert.equal(result.total, 3);
+  assert.equal(result.counts.delivered, 2);
+  assert.equal(result.counts.refuse_return, 1);
+  assert.equal(result.lifetimeDelivered, 850.25);
+  assert.equal(result.lastRefusal?.orderNumber, "RET-1001");
+  assert.equal(result.lastRefusalReason, "wrong_size");
 });
 
 test("editing an order excludes only that order from the active check", () => {

@@ -1,6 +1,6 @@
 import type { OrderStatus } from "@/lib/orders/types";
 
-/** Compact order projection used by the customer lookup (no ledger, cost or customer fields). */
+/** Compact history projection used by the customer lookup (orders plus mapped POS sales/returns). */
 export interface LookupOrder {
   id: string;
   orderNumber: string;

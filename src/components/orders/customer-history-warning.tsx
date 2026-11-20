@@ -82,7 +82,7 @@ export function CustomerHistoryWarning({ phone, excludeOrderId }: { phone: strin
         )}
         {tone === "neutral" && (
           <span>
-            {result.total} earlier {result.total === 1 ? "order" : "orders"}, {delivered} delivered
+            {result.total} earlier {result.total === 1 ? "purchase" : "purchases"}, {delivered} delivered
             {result.lastOrder ? `, last #${result.lastOrder.orderNumber} on ${formatDate(result.lastOrder.createdAt)}` : ""}.
           </span>
         )}

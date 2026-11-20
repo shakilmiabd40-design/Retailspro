@@ -12,6 +12,7 @@ import { Chip, GhostBtn, LabeledField, PosModal, PrimaryBtn, fieldInput, fieldSt
 import { DiscountInput } from "./discount-input";
 import { useAutoGeo } from "@/lib/orders/use-auto-geo";
 import { parseContactDetails } from "@/lib/orders/contact-details";
+import { CustomerHistoryWarning } from "@/components/orders/customer-history-warning";
 import { ReceiptDialog } from "./receipt";
 
 interface Row {
@@ -330,6 +331,7 @@ export function CheckoutModal({ draft, liveLines, onCustomer, onSaleSaved, onRes
                   <input value={c.phone} inputMode="tel" onChange={(e) => onCustomer({ phone: e.target.value, walkIn: false })} className={fieldInput} style={fieldStyle} />
                 </LabeledField>
               </div>
+              <CustomerHistoryWarning phone={c.phone} />
               <LabeledField label="Delivery address" required>
                 <textarea
                   value={c.address}

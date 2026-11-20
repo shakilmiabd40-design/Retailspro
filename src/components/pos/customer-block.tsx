@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, UserRound, X } from "lucide-react";
+import { CustomerHistoryWarning } from "@/components/orders/customer-history-warning";
 import type { CartCustomer } from "@/lib/pos/types";
 import { samePhone, type KnownCustomer } from "@/lib/pos/utils";
 import { fieldInput, fieldStyle } from "./ui";
@@ -75,6 +76,7 @@ export function CustomerBlock({ customer, onChange, directory, requirePhone }: {
               {focus === "name" && suggestions.length > 0 && <Suggestions items={suggestions} onPick={pick} />}
             </div>
           </div>
+          <CustomerHistoryWarning phone={customer.phone} />
           {known && !customer.name.trim() && (
             <button onClick={() => pick(known)} className="text-[12px] underline" style={{ color: "var(--brand-strong)" }}>
               Use saved details: {known.name || known.phone}
