@@ -1,4 +1,5 @@
 import type { KnownCancelReason, Order, OrderStatus } from "./types";
+import { formatTaka } from "@/lib/products/utils";
 import { formatDateTime, runtime } from "@/lib/settings/runtime";
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
@@ -70,6 +71,23 @@ export function isExchangeOrder(order: Pick<Order, "exchange">): boolean {
 export function expectedCod(order: Order): number {
   const cod = productSubtotal(order) - totalDiscount(order) + order.deliveryCharge;
   return order.exchange ? Math.max(0, cod - order.exchange.credit) : cod;
+}
+
+/**
+ * Plain-text summary used by the one-click "Copy Info" button. Labels are kept explicit so the
+ * result can be pasted into a courier sheet, chat message or spreadsheet column without guessing.
+ */
+export function orderInfoText(order: Order): string {
+  const address = [order.address, order.area, order.district].filter(Boolean).join(", ");
+  const skus = Array.from(new Set(order.items.map((item) => item.sku).filter(Boolean))).join(", ");
+  return [
+    `Order: #${order.orderNumber}`,
+    `Name: ${order.customerName}`,
+    `Phone: ${order.phone}`,
+    `Address: ${address}`,
+    `SKU: ${skus}`,
+    `COD: ${formatTaka(expectedCod(order), 2)}`,
+  ].join("\n");
 }
 
 /**

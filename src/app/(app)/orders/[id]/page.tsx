@@ -11,6 +11,7 @@ import { api } from "@/lib/persist/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { OrderStatusBadge } from "@/components/orders/status-badge";
 import { OrderTimeline } from "@/components/orders/order-timeline";
+import { CopyOrderInfoButton } from "@/components/orders/copy-order-info-button";
 import { CancelOrderModal } from "@/components/orders/cancel-order-modal";
 import { UpdateStatusModal } from "@/components/orders/update-status-modal";
 import { formatTaka } from "@/lib/products/utils";
@@ -198,6 +199,7 @@ export default function OrderDetailsPage() {
             <Pencil size={14} />
             Edit Order
           </Link>
+          <CopyOrderInfoButton order={order} />
           <button
             onClick={handlePrintInvoice}
             className="focus-ring flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-medium"

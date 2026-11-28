@@ -13,6 +13,7 @@ import type {
   SaleDraft,
 } from "./types";
 import type { Order } from "@/lib/orders/types";
+import { formatTaka } from "@/lib/products/utils";
 import { runtime } from "@/lib/settings/runtime";
 
 // ---- labels -----------------------------------------------------------------
@@ -36,6 +37,23 @@ export const RETURN_REASONS = ["Size issue", "Defect", "Changed mind", "Other"] 
 export const EMPTY_CUSTOMER: CartCustomer = { walkIn: true, name: "", phone: "", address: "", note: "" };
 export const NO_DISCOUNT: CartDiscount = { type: "fixed", value: 0 };
 export const WALK_IN_NAME = "Walk-in customer";
+
+/**
+ * Plain-text summary used by the POS sale detail's one-click "Copy Info" button.
+ * Delivery sales show Expected COD on screen; walk-in sales use the same total without the COD label.
+ */
+export function posInvoiceInfoText(invoice: PosInvoice): string {
+  const address = [invoice.customer.address, invoice.customer.area, invoice.customer.district].filter(Boolean).join(", ");
+  const skus = Array.from(new Set(invoice.items.map((item) => item.sku).filter(Boolean))).join(", ");
+  return [
+    `Invoice: ${invoice.invoiceNumber}`,
+    `Name: ${invoice.customer.walkIn ? WALK_IN_NAME : invoice.customer.name}`,
+    `Phone: ${invoice.customer.phone ?? ""}`,
+    `Address: ${address}`,
+    `SKU: ${skus}`,
+    `${invoice.saleType === "delivery" ? "COD" : "Total"}: ${formatTaka(invoice.total, 2)}`,
+  ].join("\n");
+}
 
 export function emptyDraft(): SaleDraft {
   return { lines: [], cartDiscount: { ...NO_DISCOUNT }, customer: { ...EMPTY_CUSTOMER }, discountLog: [] };

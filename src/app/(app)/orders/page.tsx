@@ -11,6 +11,7 @@ import { useToast } from "@/components/toast";
 import { useSettings } from "@/lib/settings/store";
 import { api } from "@/lib/persist/api";
 import { OrderStatusBadge } from "@/components/orders/status-badge";
+import { CopyOrderInfoButton } from "@/components/orders/copy-order-info-button";
 import { RowActionsMenu, type RowAction } from "@/components/products/row-actions-menu";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CancelOrderModal } from "@/components/orders/cancel-order-modal";
@@ -725,8 +726,11 @@ function OrdersPageInner() {
                   <td className="px-3 py-3 text-[12px]" style={{ color: "var(--text-faint)" }}>
                     {new Date(o.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <RowActionsMenu actions={rowActionsFor(o)} />
+                  <td className="px-3 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <CopyOrderInfoButton order={o} compact />
+                      <RowActionsMenu actions={rowActionsFor(o)} />
+                    </div>
                   </td>
                 </tr>
               );

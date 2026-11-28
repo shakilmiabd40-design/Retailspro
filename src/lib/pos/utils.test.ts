@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CartLine, PosInvoice, PosInvoiceItem, PosSession } from "./types";
-import { checkPayments, computeTotals, discountAmount, discountCapFor, discountLimitError, invoiceByMethod, invoiceCashNet, isWithinReturnWindow, refundValueFor, returnState, sessionSummary } from "./utils";
+import { checkPayments, computeTotals, discountAmount, discountCapFor, discountLimitError, invoiceByMethod, invoiceCashNet, isWithinReturnWindow, posInvoiceInfoText, refundValueFor, returnState, sessionSummary } from "./utils";
 
 const line = (over: Partial<CartLine> & { price: number; qty: number }): CartLine => ({
   key: over.variantId ?? "v",
@@ -107,6 +107,29 @@ const inv = (over: Partial<PosInvoice>): PosInvoice => ({
   id: "x", invoiceNumber: "INV-1", status: "completed", saleType: "walk_in", sessionId: "s1", cashierId: "u", cashierName: "U",
   customer: { walkIn: true, name: "Walk-in customer" }, items: [item()], subtotal: 0, itemDiscount: 0, cartDiscount: 0, vatPercent: 0, vat: 0,
   deliveryCharge: 0, total: 0, payments: [], tendered: 0, change: 0, discountLog: [], createdAt: new Date().toISOString(), ...over,
+});
+
+test("copy info includes the POS customer, full address, SKUs and COD", () => {
+  const delivery = inv({
+    saleType: "delivery",
+    customer: { walkIn: false, name: "Karim", phone: "01712000001", address: "House 5", area: "Dhanmondi", district: "Dhaka" },
+    items: [item({ sku: "SKU-A" }), item({ id: "i2", sku: "SKU-B" })],
+    total: 1600,
+  });
+  assert.equal(
+    posInvoiceInfoText(delivery),
+    [
+      "Invoice: INV-1",
+      "Name: Karim",
+      "Phone: 01712000001",
+      "Address: House 5, Dhanmondi, Dhaka",
+      "SKU: SKU-A, SKU-B",
+      "COD: ৳1,600.00",
+    ].join("\n")
+  );
+  const walkIn = inv({ total: 500 });
+  assert.match(posInvoiceInfoText(walkIn), /Name: Walk-in customer\n/);
+  assert.match(posInvoiceInfoText(walkIn), /Total: ৳500\.00$/);
 });
 
 test("cash kept = cash handed over − change; card and mobile are separate", () => {

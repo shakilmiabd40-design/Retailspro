@@ -11,6 +11,7 @@ import { formatDate, formatDateTime } from "@/lib/settings/runtime";
 import { usePos } from "@/lib/pos/store";
 import { PAYMENT_LABELS, REFUND_LABELS, returnState } from "@/lib/pos/utils";
 import { ReceiptDialog } from "@/components/pos/receipt";
+import { CopyPosInvoiceInfoButton } from "@/components/orders/copy-order-info-button";
 import { InvoiceStatusTag, VoidInvoiceModal } from "@/components/pos/invoice-parts";
 import { GhostBtn, Loading, NotFound, money } from "@/components/pos/ui";
 
@@ -58,6 +59,7 @@ export default function PosInvoicePage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <CopyPosInvoiceInfoButton invoice={inv} />
           <GhostBtn onClick={() => setReceipt(true)}>
             <Printer size={15} /> Print / Reprint
           </GhostBtn>
